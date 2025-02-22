@@ -1,5 +1,5 @@
-name := 'cosmic-term'
-export APPID := 'com.system76.CosmicTerm'
+name := 'eos'
+export APPID := 'de.juliankarrer.eos'
 
 rootdir := ''
 prefix := '/usr'

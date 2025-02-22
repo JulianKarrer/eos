@@ -16,6 +16,8 @@ use crate::{fl, localize::LANGUAGE_SORTER};
 pub const CONFIG_VERSION: u64 = 1;
 pub const COSMIC_THEME_DARK: &str = "COSMIC Dark";
 pub const COSMIC_THEME_LIGHT: &str = "COSMIC Light";
+pub const DEFAULT_FONT_NAME: &str = "JetBrains Mono";
+pub const DEFAULT_FONT:cosmic::iced::Font = cosmic::iced::Font::with_name(DEFAULT_FONT_NAME);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum AppTheme {
@@ -247,8 +249,8 @@ impl Default for Config {
             color_schemes_light: BTreeMap::new(),
             dim_font_weight: Weight::NORMAL.0,
             focus_follow_mouse: false,
-            font_name: "Fira Mono".to_string(),
-            font_size: 14,
+            font_name: DEFAULT_FONT_NAME.to_string(),
+            font_size: 16,
             font_size_zoom_step_mul_100: 100,
             font_stretch: Stretch::Normal.to_number(),
             font_weight: Weight::NORMAL.0,

@@ -3,7 +3,9 @@
 
 use alacritty_terminal::tty::Options;
 use alacritty_terminal::{event::Event as TermEvent, term, term::color::Colors as TermColors, tty};
+use chrono::{DateTime, Local};
 use cosmic::iced::clipboard::dnd::DndAction;
+use cosmic::iced_widget::{column, container, row, text};
 use cosmic::widget::menu::action::MenuAction;
 use cosmic::widget::menu::key_bind::KeyBind;
 use cosmic::widget::DndDestination;
@@ -28,6 +30,9 @@ use cosmic::{
 use cosmic_files::dialog::{Dialog, DialogKind, DialogMessage, DialogResult};
 use cosmic_text::{fontdb::FaceInfo, Family, Stretch, Weight};
 use localize::LANGUAGE_SORTER;
+use resource_monitor::ResourceMonitor;
+use shader::{FragmentShaderProgram, FRAME_TIME};
+use std::time::Duration;
 use std::{
     any::TypeId,
     cmp,
@@ -39,9 +44,12 @@ use std::{
 use tokio::sync::mpsc;
 
 use config::{
-    AppTheme, ColorScheme, ColorSchemeId, ColorSchemeKind, Config, Profile, ProfileId,
-    CONFIG_VERSION,
+    AppTheme, ColorScheme, ColorSchemeId, ColorSchemeKind, Config, Profile, ProfileId, CONFIG_VERSION, DEFAULT_FONT
 };
+
+mod shader;
+mod resource_monitor;
+
 mod config;
 mod mouse_reporter;
 
@@ -83,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut shell_program_opt = None;
     let mut shell_args = Vec::new();
     let mut parse_flags = true;
-    let mut daemonize = true;
+    let mut daemonize = false;
     for arg in env::args().skip(1) {
         if parse_flags {
             match arg.as_str() {
@@ -156,8 +164,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env::set_var("TERM", "xterm-256color");
 
     let mut settings = Settings::default();
-    settings = settings.theme(config.app_theme.theme());
-    settings = settings.size_limits(Limits::NONE.min_width(360.0).min_height(180.0));
+    settings = settings
+        .theme(config.app_theme.theme())
+        .size_limits(
+            Limits::NONE.min_width(360.0).min_height(180.0)
+        )
+        .default_font(DEFAULT_FONT);
 
     let flags = Flags {
         config_handler,
@@ -279,6 +291,14 @@ impl MenuAction for Action {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum TickType{
+    ResourceUpdate,
+    VisualUpdate,
+    ClockUpdate,
+    ProcessUpdate,
+}
+
 /// Messages that are used specifically by our [`App`].
 #[derive(Clone, Debug)]
 pub enum Message {
@@ -354,6 +374,7 @@ pub enum Message {
     TabPrev,
     TermEvent(pane_grid::Pane, segmented_button::Entity, TermEvent),
     TermEventTx(mpsc::UnboundedSender<(pane_grid::Pane, segmented_button::Entity, TermEvent)>),
+    Tick(TickType),
     ToggleContextPage(ContextPage),
     UpdateDefaultProfile((bool, ProfileId)),
     UseBrightBold(bool),
@@ -415,6 +436,9 @@ pub struct App {
     profile_expanded: Option<ProfileId>,
     show_advanced_font_settings: bool,
     modifiers: Modifiers,
+    frag_shader_program: FragmentShaderProgram,
+    resource_monitor:ResourceMonitor,
+    current_time:DateTime<Local>,
 }
 
 impl App {
@@ -470,6 +494,8 @@ impl App {
             .sort_by(|a, b| LANGUAGE_SORTER.compare(a, b));
         self.theme_names_light
             .sort_by(|a, b| LANGUAGE_SORTER.compare(a, b));
+        // potentially update shader background colour
+        self.frag_shader_program.update_bg(&self.config);
     }
 
     fn reset_terminal_panes_zoom(&mut self) {
@@ -592,9 +618,9 @@ impl App {
             let (header_title, window_title) = match tab_model.text(tab_model.active()) {
                 Some(tab_title) => (
                     tab_title.to_string(),
-                    format!("{tab_title} — {}", fl!("cosmic-terminal")),
+                    format!("{tab_title} — {}", fl!("eos-terminal")),
                 ),
-                None => (String::new(), fl!("cosmic-terminal")),
+                None => (String::new(), fl!("eos-terminal")),
             };
             self.set_header_title(header_title);
             Task::batch([
@@ -609,7 +635,7 @@ impl App {
             log::error!("Failed to get the specific pane");
             Task::batch([
                 if let Some(window_id) = self.core.main_window_id() {
-                    self.set_window_title(fl!("cosmic-terminal"), window_id)
+                    self.set_window_title(fl!("eos-terminal"), window_id)
                 } else {
                     Task::none()
                 },
@@ -697,30 +723,20 @@ impl App {
 
     fn about(&self) -> Element<Message> {
         let cosmic_theme::Spacing { space_xxs, .. } = self.core().system_theme().cosmic().spacing;
-        let repository = "https://github.com/pop-os/cosmic-term";
-        let hash = env!("VERGEN_GIT_SHA");
-        let short_hash: String = hash.chars().take(7).collect();
-        let date = env!("VERGEN_GIT_COMMIT_DATE");
+        let repository = "https://github.com/juliankarrer";
         widget::column::with_children(vec![
                 widget::svg(widget::svg::Handle::from_memory(
                     &include_bytes!(
-                        "../res/icons/hicolor/128x128/apps/com.system76.CosmicTerm.svg"
+                        "../res/icons/hicolor/128x128/apps/de.juliankarrer.eos.svg"
                     )[..],
                 ))
                 .into(),
-                widget::text::title3(fl!("cosmic-terminal")).into(),
+                widget::text::title3("EOS TERMINAL").into(),
+                widget::text::body("A Fork of Cosmic Terminal").into(),
                 widget::button::link(repository)
                     .on_press(Message::LaunchUrl(repository.to_string()))
                     .padding(0)
                     .into(),
-                widget::button::link(fl!(
-                    "git-description",
-                    hash = short_hash.as_str(),
-                    date = date
-                ))
-                    .on_press(Message::LaunchUrl(format!("{repository}/commits/{hash}")))
-                    .padding(0)
-                .into(),
             ])
         .align_x(Alignment::Center)
         .spacing(space_xxs)
@@ -1364,7 +1380,7 @@ impl Application for App {
     type Message = Message;
 
     /// The unique application ID to supply to the window manager.
-    const APP_ID: &'static str = "com.system76.CosmicTerm";
+    const APP_ID: &'static str = "de.juliankarrer.eos";
 
     fn core(&self) -> &Core {
         &self.core
@@ -1487,6 +1503,8 @@ impl Application for App {
         let mut terminal_ids = HashMap::new();
         terminal_ids.insert(pane_model.focused(), widget::Id::unique());
 
+        let frag_shader_program = FragmentShaderProgram::new(&flags.config);
+
         let mut app = Self {
             core,
             pane_model,
@@ -1526,10 +1544,17 @@ impl Application for App {
             profile_expanded: None,
             show_advanced_font_settings: false,
             modifiers: Modifiers::empty(),
+            frag_shader_program: frag_shader_program,
+            resource_monitor: ResourceMonitor::new(),
+            current_time: Local::now(),
         };
 
         app.set_curr_font_weights_and_stretches();
-        let command = Task::batch([app.update_config(), app.update_title(None)]);
+        let command = Task::batch([
+            app.update_config(), 
+            app.update_title(None),
+            // cosmic::iced::window::get_latest().map(|id|message::Message::Cosmic(cosmic::app::cosmic::Message::Maximize))
+        ]);
 
         (app, command)
     }
@@ -2047,7 +2072,10 @@ impl Application for App {
                 return self.update_focus();
             }
             Message::Opacity(opacity) => {
-                config_set!(opacity, cmp::min(100, opacity));
+                let opacity_percentage = cmp::min(100, opacity);
+                config_set!(opacity, opacity_percentage);
+                // update opacity in fragment shader
+                self.frag_shader_program.update_bg(&self.config);
             }
             Message::PaneClicked(pane) => {
                 self.pane_model.set_focus(pane);
@@ -2525,6 +2553,14 @@ impl Application for App {
                 // Spawn first tab
                 return self.update(Message::TabNew);
             }
+            Message::Tick(ticktype) => {
+                match ticktype {
+                    TickType::ResourceUpdate => self.resource_monitor.update_data(),
+                    TickType::VisualUpdate => self.resource_monitor.update_visual(),
+                    TickType::ClockUpdate => self.current_time = Local::now(),
+                    TickType::ProcessUpdate => todo!(),
+                }
+            }
             Message::ToggleContextPage(context_page) => {
                 if self.context_page == context_page {
                     self.core.window.show_context = !self.core.window.show_context;
@@ -2633,11 +2669,11 @@ impl Application for App {
 
     fn header_end(&self) -> Vec<Element<Self::Message>> {
         vec![
-            widget::button::custom(icon_cache_get("list-add-symbolic", 16))
-                .on_press(Message::TabNew)
-                .padding(8)
-                .class(style::Button::Icon)
-                .into(),
+            // widget::button::custom(icon_cache_get("list-add-symbolic", 16))
+            //     .on_press(Message::TabNew)
+            //     .padding(8)
+            //     .class(style::Button::Icon)
+            //     .into(),
         ]
     }
 
@@ -2662,7 +2698,10 @@ impl Application for App {
                             .button_height(32)
                             .button_spacing(space_xxs)
                             .on_activate(Message::TabActivate)
-                            .on_close(|entity| Message::TabClose(Some(entity))),
+                            .on_close(|entity| Message::TabClose(Some(entity)))
+                            .font_active(Some(DEFAULT_FONT))
+                            .font_inactive(Some(DEFAULT_FONT))
+                            .font_hovered(Some(DEFAULT_FONT)),
                     )
                     .class(style::Container::Background)
                     .width(Length::Fill),
@@ -2789,7 +2828,46 @@ impl Application for App {
         .on_drag(Message::PaneDragged);
 
         //TODO: apply window border radius xs at bottom of window
-        pane_grid.into()
+
+
+        let width = 260.;
+        let shader = crate::iced::widget::shader(&self.frag_shader_program)
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(width));
+
+        let [r, g, b, a] = FragmentShaderProgram::get_bg(&self.config);
+        let bg_container_style = container::Style{ 
+            background: Some(
+                iced::Background::Color(Color {r,g,b,a,})), 
+            ..container::Style::default()
+        };
+
+        // resource monitor
+        let monitor = self.resource_monitor.get_monitor(&self);
+
+        // piece together the side bar
+        let sidebar = 
+            // main container
+            container(
+                column![
+                    container(monitor)
+                        .width(Length::Fill)
+                        .height(Length::FillPortion(2))
+                        .style(move |_theme| {bg_container_style.clone()})
+                        .padding(Padding{top:10., ..Default::default()}), 
+                    shader,
+                    container(text(""))
+                        .width(Length::Fill)
+                        .height(Length::FillPortion(1))
+                        .style(move |_theme| {bg_container_style})
+                ]
+            )
+            .width(Length::Fixed(width)).height(Length::Fill); 
+
+        row![
+            pane_grid, 
+            sidebar,
+        ].into()
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
@@ -2863,6 +2941,13 @@ impl Application for App {
                 Some(dialog) => dialog.subscription(),
                 None => Subscription::none(),
             },
+            // add a tick subscription for the resource monitor, clock etc.
+            iced::time::every(Duration::from_secs(1))
+                .map(|_| Message::Tick(TickType::ClockUpdate)),
+            iced::time::every(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL)
+                .map(|_| Message::Tick(TickType::ResourceUpdate)),
+            iced::time::every(Duration::from_millis(FRAME_TIME))
+                .map(|_| Message::Tick(TickType::VisualUpdate)),
         ])
     }
 }

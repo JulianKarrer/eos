@@ -1269,37 +1269,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cosmic-term"
-version = "0.1.0"
-dependencies = [
- "alacritty_terminal",
- "cosmic-files",
- "cosmic-text",
- "env_logger 0.10.2",
- "fork",
- "hex_color",
- "i18n-embed",
- "i18n-embed-fl",
- "icu_collator",
- "icu_provider",
- "indexmap",
- "itertools 0.13.0",
- "lazy_static",
- "libcosmic",
- "log",
- "open",
- "palette",
- "paste",
- "ron 0.8.1",
- "rust-embed",
- "serde",
- "shlex",
- "tokio",
- "url",
- "vergen",
-]
-
-[[package]]
 name = "cosmic-text"
 version = "0.12.1"
 source = "git+https://github.com/pop-os/cosmic-text.git#1f97cbd74795cc214b489ebc4dc574ef46c12843"
@@ -1780,6 +1749,41 @@ dependencies = [
  "env_filter",
  "humantime",
  "log",
+]
+
+[[package]]
+name = "eos"
+version = "0.1.0"
+dependencies = [
+ "alacritty_terminal",
+ "bytemuck",
+ "chrono",
+ "cosmic-files",
+ "cosmic-text",
+ "env_logger 0.10.2",
+ "fork",
+ "hex_color",
+ "i18n-embed",
+ "i18n-embed-fl",
+ "icu_collator",
+ "icu_provider",
+ "indexmap",
+ "itertools 0.13.0",
+ "lazy_static",
+ "libcosmic",
+ "log",
+ "nvml-wrapper",
+ "open",
+ "palette",
+ "paste",
+ "ron 0.8.1",
+ "rust-embed",
+ "serde",
+ "shlex",
+ "sysinfo",
+ "tokio",
+ "url",
+ "vergen",
 ]
 
 [[package]]
@@ -3921,6 +3925,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ntapi"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8a3895c6391c39d7fe7ebc444a87eb2991b2a0bc718fdabd071eec617fc68e4"
+dependencies = [
+ "winapi",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4015,6 +4028,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c7398b9c8b70908f6371f47ed36737907c87c52af34c268fed0bf0ceb92ead9"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "nvml-wrapper"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c9bff0aa1d48904a1385ea2a8b97576fbdcbc9a3cfccd0d31fe978e1c4038c5"
+dependencies = [
+ "bitflags 2.8.0",
+ "libloading",
+ "nvml-wrapper-sys",
+ "static_assertions",
+ "thiserror 1.0.69",
+ "wrapcenum-derive",
+]
+
+[[package]]
+name = "nvml-wrapper-sys"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "698d45156f28781a4e79652b6ebe2eaa0589057d588d3aec1333f6466f13fcb5"
+dependencies = [
+ "libloading",
 ]
 
 [[package]]
@@ -5577,6 +5613,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sysinfo"
+version = "0.33.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fc858248ea01b66f19d8e8a6d55f41deaf91e9d495246fd01368d99935c6c01"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+ "memchr",
+ "ntapi",
+ "rayon",
+ "windows 0.56.0",
+]
+
+[[package]]
 name = "system-deps"
 version = "6.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7022,6 +7072,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d71a593cc5c42ad7876e2c1fda56f314f3754c084128833e64f1345ff8a03a"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "wrapcenum-derive"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a76ff259533532054cfbaefb115c613203c73707017459206380f03b3b3f266e"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.96",
 ]
 
 [[package]]

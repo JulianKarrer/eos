@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>de.juliankarrer.eos</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <developer_name>Julian Karrer</developer_name>
+  <name>EOS</name>
+  <summary>Terminal emulator</summary>
+  <description>
+    <p>Terminal emulator</p>
+  </description>
+  <launchable type="desktop-id">de.juliankarrer.eos.desktop</launchable>
+  <provides>
+    <id>de.juliankarrer.eos</id>
+    <binaries>
+      <binary>eos</binary>
+    </binaries>
+  </provides>
+</component>

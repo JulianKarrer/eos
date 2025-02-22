@@ -1,0 +1,10 @@
+#TODO: more build-out, desktop actions, translations?
+[Desktop Entry]
+Name=EOS
+Exec=eos
+Terminal=false
+Type=Application
+StartupNotify=true
+Icon=de.juliankarrer.eos
+Categories=EOS;System;TerminalEmulator;
+Keywords=Command;Shell;Terminal;
