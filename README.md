@@ -1,6 +1,4 @@
-<p align=center>
-    <h1 style="text-align: center;">EOS TERMINAL</h1>
-</p>
+<h1 align="center">EOS TERMINAL</h1>
 <p align=center>
     <img src="./res/icons/icon.png" width=200 height = 200/>
 </p>
