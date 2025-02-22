@@ -1,11 +1,12 @@
-# cosmic-term
-WIP COSMIC terminal emulator, built using [alacritty\_terminal](https://docs.rs/alacritty_terminal) that is provided by the [alacritty](https://github.com/alacritty/alacritty) project. `cosmic-term` provides bidirectional rendering and ligatures with a custom renderer based on [cosmic-text](https://github.com/pop-os/cosmic-text).
+<p align=center>
+    <h1 style="text-align: center;">EOS TERMINAL</h1>
+</p>
+<p align=center>
+    <img src="./res/icons/icon.png" width=200 height = 200/>
+</p>
 
-The `wgpu` feature, enabled by default, supports GPU rendering using `glyphon`
-and `wgpu`. If `wgpu` is not enabled or fails to initialize, then rendering falls
-back to using `softbuffer` and `tiny-skia`.
+A terminal emulator with an integrated resource monitor and space for shader art.
+Based on [Alacritty](https://github.com/alacritty/alacritty), forked from the [Cosmic Terminal](https://github.com/pop-os/cosmic-term), written in Rust and WGSL.
 
-## Color Schemes
-
-Custom color schemes can be imported from the `View -> Color schemes...` menu item.
-You can find templates for color schemes in the [color-schemes](color-schemes) folder.
+## Screenshot
+![Screenshot of the EOS terminal](./res/screenshot.png)
