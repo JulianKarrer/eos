@@ -9,7 +9,7 @@ use cosmic::iced::mouse;
 use cosmic::iced::mouse::Cursor;
 use crate::config::Config;
 use crate::iced::wgpu;
-use crate::Message;
+use crate::{get_term_bg_colour, Message};
 use cosmic::iced::widget::shader::Event;
 use cosmic::iced::widget::shader;
 use cosmic::iced::Rectangle;
@@ -19,7 +19,11 @@ pub const FRAME_TIME:u64 = 33;
 
 #[derive(Debug, Clone, Copy)]
 struct Uniforms {
-    start_time: Instant,
+    time: f32,
+    delta_time: Instant,
+    cpu_util: f32,
+    cpu_max: f32,
+    cpu_freq: f32,
     bg: [f32;4],
 }
 
@@ -29,6 +33,8 @@ pub struct UniformsCRepr {
     resolution: [f32;2],
     top_left: [f32;2],
     time: f32,
+    cpu_util: f32,
+    cpu_max: f32,
     r: f32,
     g: f32,
     b: f32,
@@ -50,7 +56,8 @@ struct FragmentShaderPipeline {
 }
 
 impl FragmentShaderPipeline {
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, queue: &wgpu::Queue) -> Self {
+        // create shader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("FragmentShaderPipeline shader"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
@@ -58,8 +65,64 @@ impl FragmentShaderPipeline {
             ))),
         });
 
+        // load texture
+        let image_data = include_bytes!("../res/textures/earth_lights.jpg");
+        let image = image::load_from_memory(image_data)
+            .expect("Failed to load texture")
+            .to_rgba8();
+        let dimensions = image.dimensions();
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("texture"),
+            size: wgpu::Extent3d {
+                width: dimensions.0,
+                height: dimensions.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+         // upload texture data
+         queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            image.as_raw(),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * dimensions.0),
+                rows_per_image: Some(dimensions.1),
+            },
+            wgpu::Extent3d {
+                width: dimensions.0,
+                height: dimensions.1,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        // uniforms
         let uniform_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[
+                // uniforms entry
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -68,6 +131,24 @@ impl FragmentShaderPipeline {
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
+                    count: None,
+                },
+                // texture entry
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // sampler entry
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
@@ -83,10 +164,20 @@ impl FragmentShaderPipeline {
         
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &uniform_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
             label: Some("uniform_bind_group"),
         });
 
@@ -122,10 +213,11 @@ impl FragmentShaderPipeline {
             cache: None,
         });
 
+
         Self {
             pipeline,
             uniform_buffer,
-            uniform_bind_group,
+            uniform_bind_group, 
         }
     }
 
@@ -193,7 +285,7 @@ impl shader::Primitive for FragmentShaderPrimitive {
         _viewport: &Viewport,
     ) {
         if !storage.has::<FragmentShaderPipeline>() {
-            storage.store(FragmentShaderPipeline::new(device, format));
+            storage.store(FragmentShaderPipeline::new(device, format, queue));
         }
 
         let pipeline = storage.get_mut::<FragmentShaderPipeline>().unwrap();
@@ -203,8 +295,10 @@ impl shader::Primitive for FragmentShaderPrimitive {
             &UniformsCRepr {
                 resolution: [bounds.width, bounds.height],
                 top_left: [bounds.x, bounds.y],
-                time: self.uniforms.start_time.elapsed().as_secs_f32(),
+                time: self.uniforms.time,
                 r,g,b,a,
+                cpu_util: self.uniforms.cpu_util,
+                cpu_max: self.uniforms.cpu_max,
             },
         );
     }
@@ -232,31 +326,29 @@ impl FragmentShaderProgram{
     pub fn new(config:&Config)->Self{
         Self { 
             uniforms: Uniforms{ 
-                start_time: Instant::now(), 
-                bg: Self::get_bg(config),
+                time: 0., 
+                delta_time: Instant::now(),
+                bg: get_term_bg_colour(config),
+                cpu_util: 0.,
+                cpu_freq: 0.,
+                cpu_max: 0.,
             } 
         }
     }
 
-    pub fn get_bg(config:&Config)->[f32;4]{
-        // fallback: use cosmic window background colour
-        let [mut r,mut g,mut b,_] = cosmic::iced::Color::from(config.app_theme.theme().cosmic().background.base).into_linear();
-        // attempt to get current profile's terminal background colour
-        let (name, kind) = config.syntax_theme(None);
-        let names = config.color_scheme_names(kind);
-        if let Some((_, cs_id)) = names.iter().find(|(n,_id)| *n == name ){
-            if let Some(colour_scheme) =  config.color_schemes(kind).get(cs_id) {
-                if let Some(colour) = colour_scheme.background{
-                    let [rb,gb,bb,_] = colour.to_be_bytes();
-                    [r,g,b] = [rb as f32/255., gb as f32/255., bb as f32/255.,]
-                }
-            };
-        };
-        [r,g,b,config.opacity_ratio()]
+    /// To be called from `ResourceMonitor` at least once per visual update tick
+    pub fn update_uniforms_tick(&mut self, cpu_util:f32, cpu_max:f32, cpu_freq:f32){
+        self.uniforms.cpu_util = cpu_util;
+        self.uniforms.cpu_max = cpu_max;
+        self.uniforms.cpu_freq = cpu_freq;
+        self.uniforms.time +=  self.uniforms.delta_time.elapsed().as_secs_f32() 
+            * (self.uniforms.cpu_freq.clamp(0.0, 1.0).powi(2) * 0.5 + 0.5);
+        self.uniforms.delta_time = Instant::now();
     }
 
+    /// To be called when the background colour of the terminal theme changes
     pub fn update_bg(&mut self, config:&Config){
-        self.uniforms.bg = Self::get_bg(config);
+        self.uniforms.bg = get_term_bg_colour(config);
     }
 }
 

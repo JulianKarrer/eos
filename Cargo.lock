@@ -1769,6 +1769,7 @@ dependencies = [
  "i18n-embed-fl 0.9.3",
  "icu_collator",
  "icu_provider",
+ "image",
  "indexmap",
  "itertools 0.14.0",
  "lazy_static",

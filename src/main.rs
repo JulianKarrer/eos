@@ -5,7 +5,7 @@ use alacritty_terminal::tty::Options;
 use alacritty_terminal::{event::Event as TermEvent, term, term::color::Colors as TermColors, tty};
 use chrono::{DateTime, Local};
 use cosmic::iced::clipboard::dnd::DndAction;
-use cosmic::iced_widget::{column, container, row, text};
+use cosmic::iced_widget::{column, container, row};
 use cosmic::widget::menu::action::MenuAction;
 use cosmic::widget::menu::key_bind::KeyBind;
 use cosmic::widget::DndDestination;
@@ -30,7 +30,7 @@ use cosmic::{
 use cosmic_files::dialog::{Dialog, DialogKind, DialogMessage, DialogResult};
 use cosmic_text::{fontdb::FaceInfo, Family, Stretch, Weight};
 use localize::LANGUAGE_SORTER;
-use resource_monitor::ResourceMonitor;
+use resource_monitor::{ProcessBy, ResourceMonitor};
 use shader::{FragmentShaderProgram, FRAME_TIME};
 use std::time::Duration;
 use std::{
@@ -347,6 +347,7 @@ pub enum Message {
     Paste(Option<segmented_button::Entity>),
     PastePrimary(Option<segmented_button::Entity>),
     PasteValue(Option<segmented_button::Entity>, String),
+    ProcessSortBy(ProcessBy),
     ProfileCollapse(ProfileId),
     ProfileCommand(ProfileId, String),
     ProfileDirectory(ProfileId, String),
@@ -1607,1029 +1608,1040 @@ impl Application for App {
         }
         match message {
             Message::AppTheme(app_theme) => {
-                config_set!(app_theme, app_theme);
-                return self.update_config();
-            }
+                        config_set!(app_theme, app_theme);
+                        return self.update_config();
+                    }
             Message::ClearScrollback(entity_opt) => {
-                if let Some(tab_model) = self.pane_model.active() {
-                    let entity = entity_opt.unwrap_or_else(|| tab_model.active());
-                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                        let terminal = terminal.lock().unwrap();
-                        let mut term = terminal.term.lock();
-                        term.grid_mut().clear_history();
+                        if let Some(tab_model) = self.pane_model.active() {
+                            let entity = entity_opt.unwrap_or_else(|| tab_model.active());
+                            if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                let terminal = terminal.lock().unwrap();
+                                let mut term = terminal.term.lock();
+                                term.grid_mut().clear_history();
+                            }
+                        }
                     }
-                }
-            }
             Message::ColorSchemeCollapse => {
-                self.color_scheme_expanded = None;
-            }
-            Message::ColorSchemeDelete(color_scheme_kind, color_scheme_id) => {
-                self.color_scheme_expanded = None;
-                self.config
-                    .color_schemes_mut(color_scheme_kind)
-                    .remove(&color_scheme_id);
-                return self.save_color_schemes(color_scheme_kind);
-            }
-            Message::ColorSchemeExport(color_scheme_kind, color_scheme_id_opt) => {
-                self.color_scheme_expanded = None;
-                if let Some(color_scheme_name) = match color_scheme_id_opt {
-                    Some(color_scheme_id) => self
-                        .config
-                        .color_schemes(color_scheme_kind)
-                        .get(&color_scheme_id)
-                        .map(|color_scheme| color_scheme.name.clone()),
-                    None => Some(format!("COSMIC {:?}", color_scheme_kind)),
-                } {
-                    if self.dialog_opt.is_none() {
-                        let (dialog, command) = Dialog::new(
-                            DialogKind::SaveFile {
-                                filename: format!("{}.ron", color_scheme_name),
-                            },
-                            None,
-                            Message::DialogMessage,
-                            move |result| {
-                                Message::ColorSchemeExportResult(
-                                    color_scheme_kind,
-                                    color_scheme_id_opt,
-                                    result,
-                                )
-                            },
-                        );
-                        self.dialog_opt = Some(dialog);
-                        return command;
+                        self.color_scheme_expanded = None;
                     }
-                }
-            }
-            Message::ColorSchemeExportResult(color_scheme_kind, color_scheme_id_opt, result) => {
-                //TODO: show errors in UI
-                self.dialog_opt = None;
-                if let DialogResult::Open(paths) = result {
-                    let path = &paths[0];
-                    match color_scheme_id_opt {
-                        Some(color_scheme_id) => {
-                            if let Some(color_scheme) = self
+            Message::ColorSchemeDelete(color_scheme_kind, color_scheme_id) => {
+                        self.color_scheme_expanded = None;
+                        self.config
+                            .color_schemes_mut(color_scheme_kind)
+                            .remove(&color_scheme_id);
+                        return self.save_color_schemes(color_scheme_kind);
+                    }
+            Message::ColorSchemeExport(color_scheme_kind, color_scheme_id_opt) => {
+                        self.color_scheme_expanded = None;
+                        if let Some(color_scheme_name) = match color_scheme_id_opt {
+                            Some(color_scheme_id) => self
                                 .config
                                 .color_schemes(color_scheme_kind)
                                 .get(&color_scheme_id)
-                            {
-                                match ron::ser::to_string_pretty(
-                                    &color_scheme,
-                                    ron::ser::PrettyConfig::new(),
-                                ) {
-                                    Ok(ron) => {
-                                        if let Err(err) = fs::write(path, ron) {
+                                .map(|color_scheme| color_scheme.name.clone()),
+                            None => Some(format!("COSMIC {:?}", color_scheme_kind)),
+                        } {
+                            if self.dialog_opt.is_none() {
+                                let (dialog, command) = Dialog::new(
+                                    DialogKind::SaveFile {
+                                        filename: format!("{}.ron", color_scheme_name),
+                                    },
+                                    None,
+                                    Message::DialogMessage,
+                                    move |result| {
+                                        Message::ColorSchemeExportResult(
+                                            color_scheme_kind,
+                                            color_scheme_id_opt,
+                                            result,
+                                        )
+                                    },
+                                );
+                                self.dialog_opt = Some(dialog);
+                                return command;
+                            }
+                        }
+                    }
+            Message::ColorSchemeExportResult(color_scheme_kind, color_scheme_id_opt, result) => {
+                        //TODO: show errors in UI
+                        self.dialog_opt = None;
+                        if let DialogResult::Open(paths) = result {
+                            let path = &paths[0];
+                            match color_scheme_id_opt {
+                                Some(color_scheme_id) => {
+                                    if let Some(color_scheme) = self
+                                        .config
+                                        .color_schemes(color_scheme_kind)
+                                        .get(&color_scheme_id)
+                                    {
+                                        match ron::ser::to_string_pretty(
+                                            &color_scheme,
+                                            ron::ser::PrettyConfig::new(),
+                                        ) {
+                                            Ok(ron) => {
+                                                if let Err(err) = fs::write(path, ron) {
+                                                    log::error!(
+                                                        "failed to export {:?} to {:?}: {}",
+                                                        color_scheme_id,
+                                                        path,
+                                                        err
+                                                    );
+                                                }
+                                            }
+                                            Err(err) => {
+                                                log::error!(
+                                                    "failed to serialize color scheme {:?}: {}",
+                                                    color_scheme_id,
+                                                    err
+                                                );
+                                            }
+                                        }
+                                    } else {
+                                        log::error!("failed to find color scheme {:?}", color_scheme_id);
+                                    }
+                                }
+                                None => {
+                                    let name = format!("COSMIC {:?}", color_scheme_kind);
+                                    let color_scheme = match color_scheme_kind {
+                                        ColorSchemeKind::Dark => ColorScheme::from((
+                                            name.as_str(),
+                                            &terminal_theme::cosmic_dark(),
+                                        )),
+                                        ColorSchemeKind::Light => ColorScheme::from((
+                                            name.as_str(),
+                                            &terminal_theme::cosmic_light(),
+                                        )),
+                                    };
+                                    //TODO: do not duplicate code
+                                    match ron::ser::to_string_pretty(
+                                        &color_scheme,
+                                        ron::ser::PrettyConfig::new(),
+                                    ) {
+                                        Ok(ron) => {
+                                            if let Err(err) = fs::write(path, ron) {
+                                                log::error!(
+                                                    "failed to export {:?} to {:?}: {}",
+                                                    color_scheme.name,
+                                                    path,
+                                                    err
+                                                );
+                                            }
+                                        }
+                                        Err(err) => {
                                             log::error!(
-                                                "failed to export {:?} to {:?}: {}",
-                                                color_scheme_id,
-                                                path,
+                                                "failed to serialize color scheme {:?}: {}",
+                                                color_scheme.name,
                                                 err
                                             );
                                         }
                                     }
-                                    Err(err) => {
-                                        log::error!(
-                                            "failed to serialize color scheme {:?}: {}",
-                                            color_scheme_id,
-                                            err
-                                        );
-                                    }
-                                }
-                            } else {
-                                log::error!("failed to find color scheme {:?}", color_scheme_id);
-                            }
-                        }
-                        None => {
-                            let name = format!("COSMIC {:?}", color_scheme_kind);
-                            let color_scheme = match color_scheme_kind {
-                                ColorSchemeKind::Dark => ColorScheme::from((
-                                    name.as_str(),
-                                    &terminal_theme::cosmic_dark(),
-                                )),
-                                ColorSchemeKind::Light => ColorScheme::from((
-                                    name.as_str(),
-                                    &terminal_theme::cosmic_light(),
-                                )),
-                            };
-                            //TODO: do not duplicate code
-                            match ron::ser::to_string_pretty(
-                                &color_scheme,
-                                ron::ser::PrettyConfig::new(),
-                            ) {
-                                Ok(ron) => {
-                                    if let Err(err) = fs::write(path, ron) {
-                                        log::error!(
-                                            "failed to export {:?} to {:?}: {}",
-                                            color_scheme.name,
-                                            path,
-                                            err
-                                        );
-                                    }
-                                }
-                                Err(err) => {
-                                    log::error!(
-                                        "failed to serialize color scheme {:?}: {}",
-                                        color_scheme.name,
-                                        err
-                                    );
                                 }
                             }
                         }
                     }
-                }
-            }
             Message::ColorSchemeExpand(color_scheme_kind, color_scheme_id_opt) => {
-                self.color_scheme_expanded = Some((color_scheme_kind, color_scheme_id_opt));
-            }
+                        self.color_scheme_expanded = Some((color_scheme_kind, color_scheme_id_opt));
+                    }
             Message::ColorSchemeImport(color_scheme_kind) => {
-                if self.dialog_opt.is_none() {
-                    self.color_scheme_errors.clear();
-                    let (dialog, command) = Dialog::new(
-                        DialogKind::OpenMultipleFiles,
-                        None,
-                        Message::DialogMessage,
-                        move |result| Message::ColorSchemeImportResult(color_scheme_kind, result),
-                    );
-                    self.dialog_opt = Some(dialog);
-                    return command;
-                }
-            }
+                        if self.dialog_opt.is_none() {
+                            self.color_scheme_errors.clear();
+                            let (dialog, command) = Dialog::new(
+                                DialogKind::OpenMultipleFiles,
+                                None,
+                                Message::DialogMessage,
+                                move |result| Message::ColorSchemeImportResult(color_scheme_kind, result),
+                            );
+                            self.dialog_opt = Some(dialog);
+                            return command;
+                        }
+                    }
             Message::ColorSchemeImportResult(color_scheme_kind, result) => {
-                self.dialog_opt = None;
-                if let DialogResult::Open(paths) = result {
-                    self.color_scheme_errors.clear();
-                    for path in &paths {
-                        let mut file = match fs::File::open(path) {
-                            Ok(ok) => ok,
-                            Err(err) => {
-                                self.color_scheme_errors
-                                    .push(format!("Failed to open {path:?}: {err}"));
-                                continue;
-                            }
-                        };
-                        match ron::de::from_reader::<_, ColorScheme>(&mut file) {
-                            Ok(color_scheme) => {
-                                // Get next color_scheme ID
-                                let color_scheme_id = self
-                                    .config
-                                    .color_schemes(color_scheme_kind)
-                                    .last_key_value()
-                                    .map(|(id, _)| ColorSchemeId(id.0 + 1))
-                                    .unwrap_or_default();
-                                self.config
-                                    .color_schemes_mut(color_scheme_kind)
-                                    .insert(color_scheme_id, color_scheme);
-                            }
-                            Err(err) => {
-                                self.color_scheme_errors
-                                    .push(format!("Failed to parse {path:?}: {err}"));
-                            }
-                        }
-                    }
-                    return self.save_color_schemes(color_scheme_kind);
-                }
-            }
-            Message::ColorSchemeRename(color_scheme_kind, color_scheme_id, color_scheme_name) => {
-                self.color_scheme_expanded = None;
-                let focus = self.color_scheme_renaming.is_none();
-                self.color_scheme_renaming =
-                    Some((color_scheme_kind, color_scheme_id, color_scheme_name));
-                if focus {
-                    return widget::text_input::focus(self.color_scheme_rename_id.clone());
-                }
-            }
-            Message::ColorSchemeRenameSubmit => {
-                if let Some((color_scheme_kind, color_scheme_id, color_scheme_name)) =
-                    self.color_scheme_renaming.take()
-                {
-                    if let Some(color_scheme) = self
-                        .config
-                        .color_schemes_mut(color_scheme_kind)
-                        .get_mut(&color_scheme_id)
-                    {
-                        color_scheme.name = color_scheme_name;
-                        return self.save_color_schemes(color_scheme_kind);
-                    }
-                }
-            }
-            Message::ColorSchemeTabActivate(entity) => {
-                if let Some(color_scheme_kind) =
-                    self.color_scheme_tab_model.data::<ColorSchemeKind>(entity)
-                {
-                    let context_page = ContextPage::ColorSchemes(*color_scheme_kind);
-                    if self.context_page != context_page {
-                        return self.update(Message::ToggleContextPage(context_page));
-                    }
-                }
-            }
-            Message::Config(config) => {
-                if config != self.config {
-                    log::info!("update config");
-                    //TODO: update syntax theme by clearing tabs, only if needed
-                    self.config = config;
-                    return self.update_config();
-                }
-            }
-            Message::Copy(entity_opt) => {
-                if let Some(tab_model) = self.pane_model.active() {
-                    let entity = entity_opt.unwrap_or_else(|| tab_model.active());
-                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                        let terminal = terminal.lock().unwrap();
-                        let term = terminal.term.lock();
-                        if let Some(text) = term.selection_to_string() {
-                            return Task::batch([clipboard::write(text), self.update_focus()]);
-                        }
-                    }
-                } else {
-                    log::warn!("Failed to get focused pane");
-                }
-                return self.update_focus();
-            }
-            Message::CopyOrSigint(entity_opt) => {
-                if let Some(tab_model) = self.pane_model.active() {
-                    let entity = entity_opt.unwrap_or_else(|| tab_model.active());
-                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                        let terminal = terminal.lock().unwrap();
-                        let term = terminal.term.lock();
-                        if let Some(text) = term.selection_to_string() {
-                            return Task::batch([clipboard::write(text), self.update_focus()]);
-                        } else {
-                            // Drop the lock for term so that input_scroll doesn't block forever
-                            drop(term);
-                            // 0x03 is ^C
-                            terminal.input_scroll(b"\x03".as_slice());
-                        }
-                    }
-                } else {
-                    log::warn!("Failed to get focused pane");
-                }
-                return self.update_focus();
-            }
-            Message::CopyPrimary(entity_opt) => {
-                if let Some(tab_model) = self.pane_model.active() {
-                    let entity = entity_opt.unwrap_or_else(|| tab_model.active());
-                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                        let terminal = terminal.lock().unwrap();
-                        let term = terminal.term.lock();
-                        if let Some(text) = term.selection_to_string() {
-                            return Task::batch([
-                                clipboard::write_primary(text),
-                                self.update_focus(),
-                            ]);
-                        }
-                    }
-                } else {
-                    log::warn!("Failed to get focused pane");
-                }
-            }
-            Message::DefaultFont(index) => {
-                match self.font_names.get(index) {
-                    Some(font_name) => {
-                        if font_name != &self.config.font_name {
-                            // Update font name from config
-                            {
-                                let mut font_system = font_system().write().unwrap();
-                                font_system.raw().db_mut().set_monospace_family(font_name);
-                            }
-                            let panes: Vec<_> = self.pane_model.panes.iter().collect();
-                            for (_pane, tab_model) in panes {
-                                let entities: Vec<_> = tab_model.iter().collect();
-                                for entity in entities {
-                                    if let Some(terminal) =
-                                        tab_model.data::<Mutex<Terminal>>(entity)
-                                    {
-                                        let mut terminal = terminal.lock().unwrap();
-                                        terminal.update_cell_size();
+                        self.dialog_opt = None;
+                        if let DialogResult::Open(paths) = result {
+                            self.color_scheme_errors.clear();
+                            for path in &paths {
+                                let mut file = match fs::File::open(path) {
+                                    Ok(ok) => ok,
+                                    Err(err) => {
+                                        self.color_scheme_errors
+                                            .push(format!("Failed to open {path:?}: {err}"));
+                                        continue;
+                                    }
+                                };
+                                match ron::de::from_reader::<_, ColorScheme>(&mut file) {
+                                    Ok(color_scheme) => {
+                                        // Get next color_scheme ID
+                                        let color_scheme_id = self
+                                            .config
+                                            .color_schemes(color_scheme_kind)
+                                            .last_key_value()
+                                            .map(|(id, _)| ColorSchemeId(id.0 + 1))
+                                            .unwrap_or_default();
+                                        self.config
+                                            .color_schemes_mut(color_scheme_kind)
+                                            .insert(color_scheme_id, color_scheme);
+                                    }
+                                    Err(err) => {
+                                        self.color_scheme_errors
+                                            .push(format!("Failed to parse {path:?}: {err}"));
                                     }
                                 }
                             }
-
-                            config_set!(font_name, font_name.to_string());
-                            self.set_curr_font_weights_and_stretches();
-
+                            return self.save_color_schemes(color_scheme_kind);
+                        }
+                    }
+            Message::ColorSchemeRename(color_scheme_kind, color_scheme_id, color_scheme_name) => {
+                        self.color_scheme_expanded = None;
+                        let focus = self.color_scheme_renaming.is_none();
+                        self.color_scheme_renaming =
+                            Some((color_scheme_kind, color_scheme_id, color_scheme_name));
+                        if focus {
+                            return widget::text_input::focus(self.color_scheme_rename_id.clone());
+                        }
+                    }
+            Message::ColorSchemeRenameSubmit => {
+                        if let Some((color_scheme_kind, color_scheme_id, color_scheme_name)) =
+                            self.color_scheme_renaming.take()
+                        {
+                            if let Some(color_scheme) = self
+                                .config
+                                .color_schemes_mut(color_scheme_kind)
+                                .get_mut(&color_scheme_id)
+                            {
+                                color_scheme.name = color_scheme_name;
+                                return self.save_color_schemes(color_scheme_kind);
+                            }
+                        }
+                    }
+            Message::ColorSchemeTabActivate(entity) => {
+                        if let Some(color_scheme_kind) =
+                            self.color_scheme_tab_model.data::<ColorSchemeKind>(entity)
+                        {
+                            let context_page = ContextPage::ColorSchemes(*color_scheme_kind);
+                            if self.context_page != context_page {
+                                return self.update(Message::ToggleContextPage(context_page));
+                            }
+                        }
+                    }
+            Message::Config(config) => {
+                        if config != self.config {
+                            log::info!("update config");
+                            //TODO: update syntax theme by clearing tabs, only if needed
+                            self.config = config;
                             return self.update_config();
                         }
                     }
-                    None => {
-                        log::warn!("failed to find font with index {}", index);
+            Message::Copy(entity_opt) => {
+                        if let Some(tab_model) = self.pane_model.active() {
+                            let entity = entity_opt.unwrap_or_else(|| tab_model.active());
+                            if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                let terminal = terminal.lock().unwrap();
+                                let term = terminal.term.lock();
+                                if let Some(text) = term.selection_to_string() {
+                                    return Task::batch([clipboard::write(text), self.update_focus()]);
+                                }
+                            }
+                        } else {
+                            log::warn!("Failed to get focused pane");
+                        }
+                        return self.update_focus();
                     }
-                }
-            }
+            Message::CopyOrSigint(entity_opt) => {
+                        if let Some(tab_model) = self.pane_model.active() {
+                            let entity = entity_opt.unwrap_or_else(|| tab_model.active());
+                            if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                let terminal = terminal.lock().unwrap();
+                                let term = terminal.term.lock();
+                                if let Some(text) = term.selection_to_string() {
+                                    return Task::batch([clipboard::write(text), self.update_focus()]);
+                                } else {
+                                    // Drop the lock for term so that input_scroll doesn't block forever
+                                    drop(term);
+                                    // 0x03 is ^C
+                                    terminal.input_scroll(b"\x03".as_slice());
+                                }
+                            }
+                        } else {
+                            log::warn!("Failed to get focused pane");
+                        }
+                        return self.update_focus();
+                    }
+            Message::CopyPrimary(entity_opt) => {
+                        if let Some(tab_model) = self.pane_model.active() {
+                            let entity = entity_opt.unwrap_or_else(|| tab_model.active());
+                            if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                let terminal = terminal.lock().unwrap();
+                                let term = terminal.term.lock();
+                                if let Some(text) = term.selection_to_string() {
+                                    return Task::batch([
+                                        clipboard::write_primary(text),
+                                        self.update_focus(),
+                                    ]);
+                                }
+                            }
+                        } else {
+                            log::warn!("Failed to get focused pane");
+                        }
+                    }
+            Message::DefaultFont(index) => {
+                        match self.font_names.get(index) {
+                            Some(font_name) => {
+                                if font_name != &self.config.font_name {
+                                    // Update font name from config
+                                    {
+                                        let mut font_system = font_system().write().unwrap();
+                                        font_system.raw().db_mut().set_monospace_family(font_name);
+                                    }
+                                    let panes: Vec<_> = self.pane_model.panes.iter().collect();
+                                    for (_pane, tab_model) in panes {
+                                        let entities: Vec<_> = tab_model.iter().collect();
+                                        for entity in entities {
+                                            if let Some(terminal) =
+                                                tab_model.data::<Mutex<Terminal>>(entity)
+                                            {
+                                                let mut terminal = terminal.lock().unwrap();
+                                                terminal.update_cell_size();
+                                            }
+                                        }
+                                    }
+
+                                    config_set!(font_name, font_name.to_string());
+                                    self.set_curr_font_weights_and_stretches();
+
+                                    return self.update_config();
+                                }
+                            }
+                            None => {
+                                log::warn!("failed to find font with index {}", index);
+                            }
+                        }
+                    }
             Message::DefaultFontSize(index) => match self.font_sizes.get(index) {
-                Some(font_size) => {
-                    config_set!(font_size, *font_size);
-                    self.reset_terminal_panes_zoom(); // reset zoom
-                    return self.update_config();
-                }
-                None => {
-                    log::warn!("failed to find font with index {}", index);
-                }
-            },
+                        Some(font_size) => {
+                            config_set!(font_size, *font_size);
+                            self.reset_terminal_panes_zoom(); // reset zoom
+                            return self.update_config();
+                        }
+                        None => {
+                            log::warn!("failed to find font with index {}", index);
+                        }
+                    },
             Message::DefaultFontStretch(index) => match self.curr_font_stretches.get(index) {
-                Some(font_stretch) => {
-                    config_set!(font_stretch, font_stretch.to_number());
-                    self.set_curr_font_weights_and_stretches();
-                    return self.update_config();
-                }
-                None => {
-                    log::warn!("failed to find font weight with index {}", index);
-                }
-            },
+                        Some(font_stretch) => {
+                            config_set!(font_stretch, font_stretch.to_number());
+                            self.set_curr_font_weights_and_stretches();
+                            return self.update_config();
+                        }
+                        None => {
+                            log::warn!("failed to find font weight with index {}", index);
+                        }
+                    },
             Message::DefaultFontWeight(index) => match self.curr_font_weights.get(index) {
-                Some(font_weight) => {
-                    config_set!(font_weight, *font_weight);
-                    return self.update_config();
-                }
-                None => {
-                    log::warn!("failed to find font weight with index {}", index);
-                }
-            },
+                        Some(font_weight) => {
+                            config_set!(font_weight, *font_weight);
+                            return self.update_config();
+                        }
+                        None => {
+                            log::warn!("failed to find font weight with index {}", index);
+                        }
+                    },
             Message::DefaultDimFontWeight(index) => match self.curr_font_weights.get(index) {
-                Some(font_weight) => {
-                    config_set!(dim_font_weight, *font_weight);
-                    return self.update_config();
-                }
-                None => {
-                    log::warn!("failed to find dim font weight with index {}", index);
-                }
-            },
+                        Some(font_weight) => {
+                            config_set!(dim_font_weight, *font_weight);
+                            return self.update_config();
+                        }
+                        None => {
+                            log::warn!("failed to find dim font weight with index {}", index);
+                        }
+                    },
             Message::DefaultBoldFontWeight(index) => match self.curr_font_weights.get(index) {
-                Some(font_weight) => {
-                    config_set!(bold_font_weight, *font_weight);
-                    return self.update_config();
-                }
-                None => {
-                    log::warn!("failed to find bold font weight with index {}", index);
-                }
-            },
+                        Some(font_weight) => {
+                            config_set!(bold_font_weight, *font_weight);
+                            return self.update_config();
+                        }
+                        None => {
+                            log::warn!("failed to find bold font weight with index {}", index);
+                        }
+                    },
             Message::DefaultZoomStep(index) => match self.zoom_steps.get(index) {
-                Some(zoom_step) => {
-                    config_set!(font_size_zoom_step_mul_100, *zoom_step);
-                    self.reset_terminal_panes_zoom(); // reset zoom
-                    return self.update_config();
-                }
-                None => {
-                    log::warn!("failed to find zoom step with index {}", index);
-                }
-            },
+                        Some(zoom_step) => {
+                            config_set!(font_size_zoom_step_mul_100, *zoom_step);
+                            self.reset_terminal_panes_zoom(); // reset zoom
+                            return self.update_config();
+                        }
+                        None => {
+                            log::warn!("failed to find zoom step with index {}", index);
+                        }
+                    },
             Message::DialogMessage(dialog_message) => {
-                if let Some(dialog) = &mut self.dialog_opt {
-                    return dialog.update(dialog_message);
-                }
-            }
+                        if let Some(dialog) = &mut self.dialog_opt {
+                            return dialog.update(dialog_message);
+                        }
+                    }
             Message::Drop(Some((pane, entity, data))) => {
-                self.pane_model.set_focus(pane);
-                if let Ok(value) = shlex::try_join(data.paths.iter().filter_map(|p| p.to_str())) {
-                    return Task::batch([
-                        self.update_focus(),
-                        command::message::app(Message::PasteValue(Some(entity), value)),
-                    ]);
-                }
-            }
+                        self.pane_model.set_focus(pane);
+                        if let Ok(value) = shlex::try_join(data.paths.iter().filter_map(|p| p.to_str())) {
+                            return Task::batch([
+                                self.update_focus(),
+                                command::message::app(Message::PasteValue(Some(entity), value)),
+                            ]);
+                        }
+                    }
             Message::Drop(None) => {}
             Message::Find(find) => {
-                self.find = find;
-                if find {
-                    if let Some(tab_model) = self.pane_model.active() {
-                        let entity = tab_model.active();
-                        if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                            let terminal = terminal.lock().unwrap();
-                            let term = terminal.term.lock();
-                            if let Some(text) = term.selection_to_string() {
-                                self.find_search_value = text;
+                        self.find = find;
+                        if find {
+                            if let Some(tab_model) = self.pane_model.active() {
+                                let entity = tab_model.active();
+                                if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                    let terminal = terminal.lock().unwrap();
+                                    let term = terminal.term.lock();
+                                    if let Some(text) = term.selection_to_string() {
+                                        self.find_search_value = text;
+                                    }
+                                }
+                            } else {
+                                log::warn!("Failed to get focused pane");
+                            }
+                        } else {
+                            self.find_search_value.clear();
+                        }
+
+                        // Focus correct input
+                        return self.update_focus();
+                    }
+            Message::FindNext => {
+                        if !self.find_search_value.is_empty() {
+                            if let Some(tab_model) = self.pane_model.active() {
+                                let entity = tab_model.active();
+                                if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                    let mut terminal = terminal.lock().unwrap();
+                                    terminal.search(&self.find_search_value, true);
+                                }
                             }
                         }
-                    } else {
-                        log::warn!("Failed to get focused pane");
-                    }
-                } else {
-                    self.find_search_value.clear();
-                }
 
-                // Focus correct input
-                return self.update_focus();
-            }
-            Message::FindNext => {
-                if !self.find_search_value.is_empty() {
-                    if let Some(tab_model) = self.pane_model.active() {
-                        let entity = tab_model.active();
-                        if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                            let mut terminal = terminal.lock().unwrap();
-                            terminal.search(&self.find_search_value, true);
-                        }
+                        // Focus correct input
+                        return self.update_focus();
                     }
-                }
-
-                // Focus correct input
-                return self.update_focus();
-            }
             Message::FindPrevious => {
-                if !self.find_search_value.is_empty() {
-                    if let Some(tab_model) = self.pane_model.active() {
-                        let entity = tab_model.active();
-                        if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                            let mut terminal = terminal.lock().unwrap();
-                            terminal.search(&self.find_search_value, false);
+                        if !self.find_search_value.is_empty() {
+                            if let Some(tab_model) = self.pane_model.active() {
+                                let entity = tab_model.active();
+                                if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                    let mut terminal = terminal.lock().unwrap();
+                                    terminal.search(&self.find_search_value, false);
+                                }
+                            }
+                        }
+
+                        // Focus correct input
+                        return self.update_focus();
+                    }
+            Message::FindSearchValueChanged(value) => {
+                        self.find_search_value = value;
+                    }
+            Message::MiddleClick(pane, entity_opt) => {
+                        self.pane_model.set_focus(pane);
+                        return Task::batch([
+                            self.update_focus(),
+                            clipboard::read_primary().map(move |value_opt| match value_opt {
+                                Some(value) => message::app(Message::PasteValue(entity_opt, value)),
+                                None => message::none(),
+                            }),
+                        ]);
+                    }
+            Message::FocusFollowMouse(focus_follow_mouse) => {
+                        config_set!(focus_follow_mouse, focus_follow_mouse);
+                    }
+            Message::Key(modifiers, key) => {
+                        for (key_bind, action) in &self.key_binds {
+                            if key_bind.matches(modifiers, &key) {
+                                return self.update(action.message(None));
+                            }
                         }
                     }
-                }
-
-                // Focus correct input
-                return self.update_focus();
-            }
-            Message::FindSearchValueChanged(value) => {
-                self.find_search_value = value;
-            }
-            Message::MiddleClick(pane, entity_opt) => {
-                self.pane_model.set_focus(pane);
-                return Task::batch([
-                    self.update_focus(),
-                    clipboard::read_primary().map(move |value_opt| match value_opt {
-                        Some(value) => message::app(Message::PasteValue(entity_opt, value)),
-                        None => message::none(),
-                    }),
-                ]);
-            }
-            Message::FocusFollowMouse(focus_follow_mouse) => {
-                config_set!(focus_follow_mouse, focus_follow_mouse);
-            }
-            Message::Key(modifiers, key) => {
-                for (key_bind, action) in &self.key_binds {
-                    if key_bind.matches(modifiers, &key) {
-                        return self.update(action.message(None));
-                    }
-                }
-            }
             Message::LaunchUrl(url) => {
-                if let Err(err) = open::that_detached(&url) {
-                    log::warn!("failed to open {:?}: {}", url, err);
-                }
-            }
+                        if let Err(err) = open::that_detached(&url) {
+                            log::warn!("failed to open {:?}: {}", url, err);
+                        }
+                    }
             Message::Modifiers(modifiers) => {
-                self.modifiers = modifiers;
-            }
+                        self.modifiers = modifiers;
+                    }
             Message::MouseEnter(pane) => {
-                self.pane_model.set_focus(pane);
-                return self.update_focus();
-            }
+                        self.pane_model.set_focus(pane);
+                        return self.update_focus();
+                    }
             Message::Opacity(opacity) => {
-                let opacity_percentage = cmp::min(100, opacity);
-                config_set!(opacity, opacity_percentage);
-                // update opacity in fragment shader
-                self.frag_shader_program.update_bg(&self.config);
-            }
+                        let opacity_percentage = cmp::min(100, opacity);
+                        config_set!(opacity, opacity_percentage);
+                        // update opacity in fragment shader
+                        self.frag_shader_program.update_bg(&self.config);
+                    }
             Message::PaneClicked(pane) => {
-                self.pane_model.set_focus(pane);
-                return self.update_title(Some(pane));
-            }
+                        self.pane_model.set_focus(pane);
+                        return self.update_title(Some(pane));
+                    }
             Message::PaneSplit(axis) => {
-                let result = self.pane_model.panes.split(
-                    axis,
-                    self.pane_model.focused(),
-                    segmented_button::ModelBuilder::default().build(),
-                );
-                if let Some((pane, _)) = result {
-                    self.terminal_ids.insert(pane, widget::Id::unique());
-                    let command =
-                        self.create_and_focus_new_terminal(pane, self.get_default_profile());
-                    self.pane_model.panes_created += 1;
-                    return command;
-                }
-            }
+                        let result = self.pane_model.panes.split(
+                            axis,
+                            self.pane_model.focused(),
+                            segmented_button::ModelBuilder::default().build(),
+                        );
+                        if let Some((pane, _)) = result {
+                            self.terminal_ids.insert(pane, widget::Id::unique());
+                            let command =
+                                self.create_and_focus_new_terminal(pane, self.get_default_profile());
+                            self.pane_model.panes_created += 1;
+                            return command;
+                        }
+                    }
             Message::PaneToggleMaximized => {
-                if self.pane_model.panes.maximized().is_some() {
-                    self.pane_model.panes.restore();
-                } else {
-                    self.pane_model.panes.maximize(self.pane_model.focused());
-                }
-                return self.update_focus();
-            }
+                        if self.pane_model.panes.maximized().is_some() {
+                            self.pane_model.panes.restore();
+                        } else {
+                            self.pane_model.panes.maximize(self.pane_model.focused());
+                        }
+                        return self.update_focus();
+                    }
             Message::PaneFocusAdjacent(direction) => {
-                if let Some(adjacent) = self
-                    .pane_model
-                    .panes
-                    .adjacent(self.pane_model.focused(), direction)
-                {
-                    self.pane_model.set_focus(adjacent);
-                    return self.update_title(Some(adjacent));
-                }
-            }
+                        if let Some(adjacent) = self
+                            .pane_model
+                            .panes
+                            .adjacent(self.pane_model.focused(), direction)
+                        {
+                            self.pane_model.set_focus(adjacent);
+                            return self.update_title(Some(adjacent));
+                        }
+                    }
             Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
-                self.pane_model.panes.resize(split, ratio);
-            }
+                        self.pane_model.panes.resize(split, ratio);
+                    }
             Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
-                self.pane_model.panes.drop(pane, target);
-            }
+                        self.pane_model.panes.drop(pane, target);
+                    }
             Message::PaneDragged(_) => {}
             Message::Paste(entity_opt) => {
-                return clipboard::read().map(move |value_opt| match value_opt {
-                    Some(value) => message::app(Message::PasteValue(entity_opt, value)),
-                    None => message::none(),
-                });
-            }
-            Message::PastePrimary(entity_opt) => {
-                return clipboard::read_primary().map(move |value_opt| match value_opt {
-                    Some(value) => message::app(Message::PasteValue(entity_opt, value)),
-                    None => message::none(),
-                });
-            }
-            Message::PasteValue(entity_opt, value) => {
-                if let Some(tab_model) = self.pane_model.active() {
-                    let entity = entity_opt.unwrap_or_else(|| tab_model.active());
-                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                        let terminal = terminal.lock().unwrap();
-                        terminal.paste(value);
+                        return clipboard::read().map(move |value_opt| match value_opt {
+                            Some(value) => message::app(Message::PasteValue(entity_opt, value)),
+                            None => message::none(),
+                        });
                     }
-                }
-                return self.update_focus();
-            }
-            Message::ProfileCollapse(_profile_id) => {
-                self.profile_expanded = None;
-            }
-            Message::ProfileCommand(profile_id, text) => {
-                if let Some(profile) = self.config.profiles.get_mut(&profile_id) {
-                    profile.command = text;
-                    return self.save_profiles();
-                }
-            }
-            Message::ProfileDirectory(profile_id, text) => {
-                if let Some(profile) = self.config.profiles.get_mut(&profile_id) {
-                    profile.working_directory = text;
-                    return self.save_profiles();
-                }
-            }
-            Message::ProfileExpand(profile_id) => {
-                self.profile_expanded = Some(profile_id);
-            }
-            Message::ProfileHold(profile_id, hold) => {
-                if let Some(profile) = self.config.profiles.get_mut(&profile_id) {
-                    profile.hold = hold;
-                    return self.save_profiles();
-                }
-            }
-            Message::ProfileName(profile_id, text) => {
-                if let Some(profile) = self.config.profiles.get_mut(&profile_id) {
-                    profile.name = text;
-                    return self.save_profiles();
-                }
-            }
-            Message::ProfileNew => {
-                // Get next profile ID
-                let profile_id = self
-                    .config
-                    .profiles
-                    .last_key_value()
-                    .map(|(id, _)| ProfileId(id.0 + 1))
-                    .unwrap_or_default();
-                self.config.profiles.insert(profile_id, Profile::default());
-                self.profile_expanded = Some(profile_id);
-                return self.save_profiles();
-            }
-            Message::ProfileOpen(profile_id) => {
-                return self
-                    .create_and_focus_new_terminal(self.pane_model.focused(), Some(profile_id));
-            }
-            Message::ProfileRemove(profile_id) => {
-                // Reset matching terminals to default profile
-                for (_pane, tab_model) in self.pane_model.panes.iter() {
-                    for entity in tab_model.iter() {
-                        if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                            let mut terminal = terminal.lock().unwrap();
-                            if terminal.profile_id_opt == Some(profile_id) {
-                                terminal.profile_id_opt = None;
+            Message::PastePrimary(entity_opt) => {
+                        return clipboard::read_primary().map(move |value_opt| match value_opt {
+                            Some(value) => message::app(Message::PasteValue(entity_opt, value)),
+                            None => message::none(),
+                        });
+                    }
+            Message::PasteValue(entity_opt, value) => {
+                        if let Some(tab_model) = self.pane_model.active() {
+                            let entity = entity_opt.unwrap_or_else(|| tab_model.active());
+                            if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                let terminal = terminal.lock().unwrap();
+                                terminal.paste(value);
                             }
                         }
+                        return self.update_focus();
                     }
-                }
-                if Some(profile_id) == self.get_default_profile() {
-                    config_set!(default_profile, None);
-                }
-                self.config.profiles.remove(&profile_id);
-                return self.save_profiles();
-            }
-            Message::ProfileSyntaxTheme(profile_id, color_scheme_kind, theme_i) => {
-                match self
-                    .theme_names(color_scheme_kind)
-                    .get(theme_i)
-                    .map(|x| x.to_string())
-                {
-                    Some(theme_name) => {
+            Message::ProcessSortBy(process_by) => {
+                self.resource_monitor.set_process_sorting(process_by)
+            },
+            Message::ProfileCollapse(_profile_id) => {
+                        self.profile_expanded = None;
+                    }
+            Message::ProfileCommand(profile_id, text) => {
                         if let Some(profile) = self.config.profiles.get_mut(&profile_id) {
-                            match color_scheme_kind {
-                                ColorSchemeKind::Dark => {
-                                    profile.syntax_theme_dark = theme_name;
-                                }
-                                ColorSchemeKind::Light => {
-                                    profile.syntax_theme_light = theme_name;
-                                }
-                            }
+                            profile.command = text;
                             return self.save_profiles();
                         }
                     }
-                    None => {
-                        log::warn!("failed to find syntax theme with index {}", theme_i);
+            Message::ProfileDirectory(profile_id, text) => {
+                        if let Some(profile) = self.config.profiles.get_mut(&profile_id) {
+                            profile.working_directory = text;
+                            return self.save_profiles();
+                        }
                     }
-                }
-            }
+            Message::ProfileExpand(profile_id) => {
+                        self.profile_expanded = Some(profile_id);
+                    }
+            Message::ProfileHold(profile_id, hold) => {
+                        if let Some(profile) = self.config.profiles.get_mut(&profile_id) {
+                            profile.hold = hold;
+                            return self.save_profiles();
+                        }
+                    }
+            Message::ProfileName(profile_id, text) => {
+                        if let Some(profile) = self.config.profiles.get_mut(&profile_id) {
+                            profile.name = text;
+                            return self.save_profiles();
+                        }
+                    }
+            Message::ProfileNew => {
+                        // Get next profile ID
+                        let profile_id = self
+                            .config
+                            .profiles
+                            .last_key_value()
+                            .map(|(id, _)| ProfileId(id.0 + 1))
+                            .unwrap_or_default();
+                        self.config.profiles.insert(profile_id, Profile::default());
+                        self.profile_expanded = Some(profile_id);
+                        return self.save_profiles();
+                    }
+            Message::ProfileOpen(profile_id) => {
+                        return self
+                            .create_and_focus_new_terminal(self.pane_model.focused(), Some(profile_id));
+                    }
+            Message::ProfileRemove(profile_id) => {
+                        // Reset matching terminals to default profile
+                        for (_pane, tab_model) in self.pane_model.panes.iter() {
+                            for entity in tab_model.iter() {
+                                if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                    let mut terminal = terminal.lock().unwrap();
+                                    if terminal.profile_id_opt == Some(profile_id) {
+                                        terminal.profile_id_opt = None;
+                                    }
+                                }
+                            }
+                        }
+                        if Some(profile_id) == self.get_default_profile() {
+                            config_set!(default_profile, None);
+                        }
+                        self.config.profiles.remove(&profile_id);
+                        return self.save_profiles();
+                    }
+            Message::ProfileSyntaxTheme(profile_id, color_scheme_kind, theme_i) => {
+                        match self
+                            .theme_names(color_scheme_kind)
+                            .get(theme_i)
+                            .map(|x| x.to_string())
+                        {
+                            Some(theme_name) => {
+                                if let Some(profile) = self.config.profiles.get_mut(&profile_id) {
+                                    match color_scheme_kind {
+                                        ColorSchemeKind::Dark => {
+                                            profile.syntax_theme_dark = theme_name;
+                                        }
+                                        ColorSchemeKind::Light => {
+                                            profile.syntax_theme_light = theme_name;
+                                        }
+                                    }
+                                    return self.save_profiles();
+                                }
+                            }
+                            None => {
+                                log::warn!("failed to find syntax theme with index {}", theme_i);
+                            }
+                        }
+                    }
             Message::ProfileTabTitle(profile_id, text) => {
-                if let Some(profile) = self.config.profiles.get_mut(&profile_id) {
-                    profile.tab_title = text;
-                    return self.save_profiles();
-                }
-            }
+                        if let Some(profile) = self.config.profiles.get_mut(&profile_id) {
+                            profile.tab_title = text;
+                            return self.save_profiles();
+                        }
+                    }
             Message::SelectAll(entity_opt) => {
-                if let Some(tab_model) = self.pane_model.active() {
-                    let entity = entity_opt.unwrap_or_else(|| tab_model.active());
-                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                        let mut terminal = terminal.lock().unwrap();
-                        terminal.select_all();
-                    }
-                }
-                return self.update_focus();
-            }
-            Message::ShowHeaderBar(show_headerbar) => {
-                if show_headerbar != self.config.show_headerbar {
-                    config_set!(show_headerbar, show_headerbar);
-                    return self.update_config();
-                }
-            }
-            Message::UseBrightBold(use_bright_bold) => {
-                if use_bright_bold != self.config.use_bright_bold {
-                    config_set!(use_bright_bold, use_bright_bold);
-                    return self.update_config();
-                }
-            }
-            Message::ShowAdvancedFontSettings(show) => {
-                self.show_advanced_font_settings = show;
-            }
-            Message::SystemThemeChange => {
-                return self.update_config();
-            }
-            Message::SyntaxTheme(color_scheme_kind, index) => {
-                match self.theme_names(color_scheme_kind).get(index) {
-                    Some(theme_name) => {
-                        match color_scheme_kind {
-                            ColorSchemeKind::Dark => {
-                                config_set!(syntax_theme_dark, theme_name.to_string());
-                            }
-                            ColorSchemeKind::Light => {
-                                config_set!(syntax_theme_light, theme_name.to_string());
-                            }
-                        }
-                        return self.update_config();
-                    }
-                    None => {
-                        log::warn!("failed to find syntax theme with index {}", index);
-                    }
-                }
-            }
-            Message::TabActivate(entity) => {
-                if let Some(tab_model) = self.pane_model.active_mut() {
-                    tab_model.activate(entity);
-                }
-                return self.update_title(None);
-            }
-            Message::TabActivateJump(pos) => {
-                if let Some(tab_model) = self.pane_model.active() {
-                    // Length is always at least one so there shouldn't be a division by zero
-                    let len = tab_model.iter().count();
-                    // The typical pattern is that 1-8 selects tabs 1-8 while 9 selects the last tab
-                    let pos = if pos >= 8 || pos > len - 1 {
-                        len - 1
-                    } else {
-                        pos % len
-                    };
-
-                    let entity = tab_model.iter().nth(pos);
-                    if let Some(entity) = entity {
-                        return self.update(Message::TabActivate(entity));
-                    }
-                }
-            }
-            Message::TabClose(entity_opt) => {
-                if let Some(tab_model) = self.pane_model.active_mut() {
-                    let entity = entity_opt.unwrap_or_else(|| tab_model.active());
-
-                    // Activate closest item
-                    if let Some(position) = tab_model.position(entity) {
-                        if position > 0 {
-                            tab_model.activate_position(position - 1);
-                        } else {
-                            tab_model.activate_position(position + 1);
-                        }
-                    }
-
-                    // Remove item
-                    tab_model.remove(entity);
-
-                    // If that was the last tab, close current pane
-                    if tab_model.iter().next().is_none() {
-                        if let Some((_state, sibling)) =
-                            self.pane_model.panes.close(self.pane_model.focused())
-                        {
-                            self.terminal_ids.remove(&self.pane_model.focused());
-                            self.pane_model.set_focus(sibling);
-                        } else {
-                            //Last pane, closing window
-                            if let Some(window_id) = self.core.main_window_id() {
-                                return window::close(window_id);
-                            }
-                        }
-                    }
-                }
-
-                return self.update_title(None);
-            }
-            Message::TabContextAction(entity, action) => {
-                if let Some(tab_model) = self.pane_model.active() {
-                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                        // Close context menu
-                        {
-                            let mut terminal = terminal.lock().unwrap();
-                            terminal.context_menu = None;
-                        }
-                        // Run action's message
-                        return self.update(action.message(Some(entity)));
-                    }
-                }
-            }
-            Message::TabContextMenu(pane, position_opt) => {
-                // Close any existing context menues
-                let panes: Vec<_> = self.pane_model.panes.iter().collect();
-                for (_pane, tab_model) in panes {
-                    let entity = tab_model.active();
-                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                        let mut terminal = terminal.lock().unwrap();
-                        terminal.context_menu = None;
-                    }
-                }
-
-                // Show the context menu on the correct pane / terminal
-                if let Some(tab_model) = self.pane_model.panes.get(pane) {
-                    let entity = tab_model.active();
-                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                        // Update context menu position
-                        let mut terminal = terminal.lock().unwrap();
-                        terminal.context_menu = position_opt;
-                    }
-                }
-
-                // Shift focus to the pane / terminal
-                // with the context menu
-                self.pane_model.set_focus(pane);
-                return self.update_title(Some(pane));
-            }
-            Message::TabNew => {
-                return self.create_and_focus_new_terminal(
-                    self.pane_model.focused(),
-                    self.get_default_profile(),
-                )
-            }
-            Message::TabNewNoProfile => {
-                return self.create_and_focus_new_terminal(self.pane_model.focused(), None)
-            }
-            Message::TabNext => {
-                if let Some(tab_model) = self.pane_model.active() {
-                    let len = tab_model.iter().count();
-                    // Next tab position. Wraps around to 0 (first tab) if the last tab is active.
-                    let pos = tab_model
-                        .position(tab_model.active())
-                        .map(|i| (i as usize + 1) % len)
-                        .expect("at least one tab is always open");
-
-                    let entity = tab_model.iter().nth(pos);
-                    if let Some(entity) = entity {
-                        return self.update(Message::TabActivate(entity));
-                    }
-                }
-            }
-            Message::TabPrev => {
-                if let Some(tab_model) = self.pane_model.active() {
-                    let pos = tab_model
-                        .position(tab_model.active())
-                        .and_then(|i| (i as usize).checked_sub(1))
-                        .unwrap_or_else(|| {
-                            tab_model.iter().count().checked_sub(1).unwrap_or_default()
-                        });
-
-                    let entity = tab_model.iter().nth(pos);
-                    if let Some(entity) = entity {
-                        return self.update(Message::TabActivate(entity));
-                    }
-                }
-            }
-            Message::TermEvent(pane, entity, event) => {
-                match event {
-                    TermEvent::Bell => {
-                        //TODO: audible or visible bell options?
-                    }
-                    TermEvent::ClipboardLoad(kind, callback) => {
-                        match kind {
-                            term::ClipboardType::Clipboard => {
-                                log::info!("clipboard load");
-                                return clipboard::read().map(move |data_opt| {
-                                    //TODO: what to do when data_opt is None?
-                                    callback(&data_opt.unwrap_or_default());
-                                    // We don't need to do anything else
-                                    message::none()
-                                });
-                            }
-                            term::ClipboardType::Selection => {
-                                log::info!("TODO: load selection");
-                            }
-                        }
-                    }
-                    TermEvent::ClipboardStore(kind, data) => match kind {
-                        term::ClipboardType::Clipboard => {
-                            log::info!("clipboard store");
-                            return clipboard::write(data);
-                        }
-                        term::ClipboardType::Selection => {
-                            log::info!("TODO: store selection");
-                        }
-                    },
-                    TermEvent::ColorRequest(index, f) => {
-                        if let Some(tab_model) = self.pane_model.panes.get(pane) {
-                            if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                                let terminal = terminal.lock().unwrap();
-                                let rgb = terminal.colors()[index].unwrap_or_default();
-                                let text = f(rgb);
-                                terminal.input_no_scroll(text.into_bytes());
-                            }
-                        }
-                    }
-                    TermEvent::CursorBlinkingChange => {
-                        //TODO: should we blink the cursor?
-                    }
-                    TermEvent::Exit => {
-                        return self.update(Message::TabClose(Some(entity)));
-                    }
-                    TermEvent::PtyWrite(text) => {
-                        if let Some(tab_model) = self.pane_model.panes.get(pane) {
-                            if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                                let terminal = terminal.lock().unwrap();
-                                terminal.input_no_scroll(text.into_bytes());
-                            }
-                        }
-                    }
-                    TermEvent::ResetTitle => {
-                        if let Some(tab_model) = self.pane_model.panes.get_mut(pane) {
-                            let tab_title_override =
-                                if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                                    let terminal = terminal.lock().unwrap();
-                                    terminal.tab_title_override.clone()
-                                } else {
-                                    None
-                                };
-                            tab_model.text_set(
-                                entity,
-                                tab_title_override.unwrap_or_else(|| fl!("new-terminal")),
-                            );
-                        }
-                        return self.update_title(Some(pane));
-                    }
-                    TermEvent::TextAreaSizeRequest(f) => {
-                        if let Some(tab_model) = self.pane_model.panes.get(pane) {
-                            if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                                let terminal = terminal.lock().unwrap();
-                                let text = f(terminal.size().into());
-                                terminal.input_no_scroll(text.into_bytes());
-                            }
-                        }
-                    }
-                    TermEvent::Title(title) => {
-                        if let Some(tab_model) = self.pane_model.panes.get_mut(pane) {
-                            let has_override =
-                                if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
-                                    let terminal = terminal.lock().unwrap();
-                                    terminal.tab_title_override.is_some()
-                                } else {
-                                    false
-                                };
-                            if !has_override {
-                                tab_model.text_set(entity, title);
-                            }
-                        }
-                        return self.update_title(Some(pane));
-                    }
-                    TermEvent::MouseCursorDirty | TermEvent::Wakeup => {
-                        if let Some(tab_model) = self.pane_model.panes.get(pane) {
+                        if let Some(tab_model) = self.pane_model.active() {
+                            let entity = entity_opt.unwrap_or_else(|| tab_model.active());
                             if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
                                 let mut terminal = terminal.lock().unwrap();
-                                terminal.needs_update = true;
+                                terminal.select_all();
+                            }
+                        }
+                        return self.update_focus();
+                    }
+            Message::ShowHeaderBar(show_headerbar) => {
+                        if show_headerbar != self.config.show_headerbar {
+                            config_set!(show_headerbar, show_headerbar);
+                            return self.update_config();
+                        }
+                    }
+            Message::UseBrightBold(use_bright_bold) => {
+                        if use_bright_bold != self.config.use_bright_bold {
+                            config_set!(use_bright_bold, use_bright_bold);
+                            return self.update_config();
+                        }
+                    }
+            Message::ShowAdvancedFontSettings(show) => {
+                        self.show_advanced_font_settings = show;
+                    }
+            Message::SystemThemeChange => {
+                        return self.update_config();
+                    }
+            Message::SyntaxTheme(color_scheme_kind, index) => {
+                        match self.theme_names(color_scheme_kind).get(index) {
+                            Some(theme_name) => {
+                                match color_scheme_kind {
+                                    ColorSchemeKind::Dark => {
+                                        config_set!(syntax_theme_dark, theme_name.to_string());
+                                    }
+                                    ColorSchemeKind::Light => {
+                                        config_set!(syntax_theme_light, theme_name.to_string());
+                                    }
+                                }
+                                return self.update_config();
+                            }
+                            None => {
+                                log::warn!("failed to find syntax theme with index {}", index);
                             }
                         }
                     }
-                    TermEvent::ChildExit(_error_code) => {
-                        //Ignore this for now
+            Message::TabActivate(entity) => {
+                        if let Some(tab_model) = self.pane_model.active_mut() {
+                            tab_model.activate(entity);
+                        }
+                        return self.update_title(None);
                     }
-                }
-            }
-            Message::TermEventTx(term_event_tx) => {
-                // Check if the terminal event channel was reset
-                if self.term_event_tx_opt.is_some() {
-                    // Close tabs using old terminal event channel
-                    log::warn!("terminal event channel reset, closing tabs");
+            Message::TabActivateJump(pos) => {
+                        if let Some(tab_model) = self.pane_model.active() {
+                            // Length is always at least one so there shouldn't be a division by zero
+                            let len = tab_model.iter().count();
+                            // The typical pattern is that 1-8 selects tabs 1-8 while 9 selects the last tab
+                            let pos = if pos >= 8 || pos > len - 1 {
+                                len - 1
+                            } else {
+                                pos % len
+                            };
 
-                    // First, close other panes
-                    while let Some((_state, sibling)) =
-                        self.pane_model.panes.close(self.pane_model.focused())
-                    {
-                        self.terminal_ids.remove(&self.pane_model.focused());
-                        self.pane_model.set_focus(sibling);
-                    }
-
-                    // Next, close all tabs in the active pane
-                    if let Some(tab_model) = self.pane_model.active_mut() {
-                        let entities: Vec<_> = tab_model.iter().collect();
-                        for entity in entities {
-                            tab_model.remove(entity);
+                            let entity = tab_model.iter().nth(pos);
+                            if let Some(entity) = entity {
+                                return self.update(Message::TabActivate(entity));
+                            }
                         }
                     }
-                }
+            Message::TabClose(entity_opt) => {
+                        if let Some(tab_model) = self.pane_model.active_mut() {
+                            let entity = entity_opt.unwrap_or_else(|| tab_model.active());
 
-                // Set new terminal event channel
-                self.term_event_tx_opt = Some(term_event_tx);
+                            // Activate closest item
+                            if let Some(position) = tab_model.position(entity) {
+                                if position > 0 {
+                                    tab_model.activate_position(position - 1);
+                                } else {
+                                    tab_model.activate_position(position + 1);
+                                }
+                            }
 
-                // Spawn first tab
-                return self.update(Message::TabNew);
-            }
-            Message::Tick(ticktype) => {
-                match ticktype {
-                    TickType::ResourceUpdate => self.resource_monitor.update_data(),
-                    TickType::VisualUpdate => self.resource_monitor.update_visual(),
-                    TickType::ClockUpdate => self.current_time = Local::now(),
-                    TickType::ProcessUpdate => todo!(),
-                }
-            }
-            Message::ToggleContextPage(context_page) => {
-                if self.context_page == context_page {
-                    self.core.window.show_context = !self.core.window.show_context;
-                } else {
-                    self.context_page = context_page;
-                    self.core.window.show_context = true;
-                }
+                            // Remove item
+                            tab_model.remove(entity);
 
-                // Extra work to do to prepare context pages
-                if let ContextPage::ColorSchemes(color_scheme_kind) = self.context_page {
-                    self.color_scheme_errors.clear();
-                    self.color_scheme_expanded = None;
-                    self.color_scheme_renaming = None;
-                    self.color_scheme_tab_model = widget::segmented_button::Model::default();
-                    let dark_entity = self
-                        .color_scheme_tab_model
-                        .insert()
-                        .text(fl!("dark"))
-                        .data(ColorSchemeKind::Dark)
-                        .id();
-                    let light_entity = self
-                        .color_scheme_tab_model
-                        .insert()
-                        .text(fl!("light"))
-                        .data(ColorSchemeKind::Light)
-                        .id();
-                    self.color_scheme_tab_model
-                        .activate(match color_scheme_kind {
-                            ColorSchemeKind::Dark => dark_entity,
-                            ColorSchemeKind::Light => light_entity,
-                        });
-                }
-            }
-            Message::UpdateDefaultProfile((default, profile_id)) => {
-                config_set!(default_profile, default.then_some(profile_id));
-            }
-            Message::WindowClose => {
-                if let Some(window_id) = self.core.main_window_id() {
-                    return window::close(window_id);
-                }
-            }
-            Message::WindowNew => match env::current_exe() {
-                Ok(exe) => match process::Command::new(&exe).spawn() {
-                    Ok(_child) => {}
-                    Err(err) => {
-                        log::error!("failed to execute {:?}: {}", exe, err);
+                            // If that was the last tab, close current pane
+                            if tab_model.iter().next().is_none() {
+                                if let Some((_state, sibling)) =
+                                    self.pane_model.panes.close(self.pane_model.focused())
+                                {
+                                    self.terminal_ids.remove(&self.pane_model.focused());
+                                    self.pane_model.set_focus(sibling);
+                                } else {
+                                    //Last pane, closing window
+                                    if let Some(window_id) = self.core.main_window_id() {
+                                        return window::close(window_id);
+                                    }
+                                }
+                            }
+                        }
+
+                        return self.update_title(None);
                     }
-                },
-                Err(err) => {
-                    log::error!("failed to get current executable path: {}", err);
-                }
-            },
+            Message::TabContextAction(entity, action) => {
+                        if let Some(tab_model) = self.pane_model.active() {
+                            if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                // Close context menu
+                                {
+                                    let mut terminal = terminal.lock().unwrap();
+                                    terminal.context_menu = None;
+                                }
+                                // Run action's message
+                                return self.update(action.message(Some(entity)));
+                            }
+                        }
+                    }
+            Message::TabContextMenu(pane, position_opt) => {
+                        // Close any existing context menues
+                        let panes: Vec<_> = self.pane_model.panes.iter().collect();
+                        for (_pane, tab_model) in panes {
+                            let entity = tab_model.active();
+                            if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                let mut terminal = terminal.lock().unwrap();
+                                terminal.context_menu = None;
+                            }
+                        }
+
+                        // Show the context menu on the correct pane / terminal
+                        if let Some(tab_model) = self.pane_model.panes.get(pane) {
+                            let entity = tab_model.active();
+                            if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                // Update context menu position
+                                let mut terminal = terminal.lock().unwrap();
+                                terminal.context_menu = position_opt;
+                            }
+                        }
+
+                        // Shift focus to the pane / terminal
+                        // with the context menu
+                        self.pane_model.set_focus(pane);
+                        return self.update_title(Some(pane));
+                    }
+            Message::TabNew => {
+                        return self.create_and_focus_new_terminal(
+                            self.pane_model.focused(),
+                            self.get_default_profile(),
+                        )
+                    }
+            Message::TabNewNoProfile => {
+                        return self.create_and_focus_new_terminal(self.pane_model.focused(), None)
+                    }
+            Message::TabNext => {
+                        if let Some(tab_model) = self.pane_model.active() {
+                            let len = tab_model.iter().count();
+                            // Next tab position. Wraps around to 0 (first tab) if the last tab is active.
+                            let pos = tab_model
+                                .position(tab_model.active())
+                                .map(|i| (i as usize + 1) % len)
+                                .expect("at least one tab is always open");
+
+                            let entity = tab_model.iter().nth(pos);
+                            if let Some(entity) = entity {
+                                return self.update(Message::TabActivate(entity));
+                            }
+                        }
+                    }
+            Message::TabPrev => {
+                        if let Some(tab_model) = self.pane_model.active() {
+                            let pos = tab_model
+                                .position(tab_model.active())
+                                .and_then(|i| (i as usize).checked_sub(1))
+                                .unwrap_or_else(|| {
+                                    tab_model.iter().count().checked_sub(1).unwrap_or_default()
+                                });
+
+                            let entity = tab_model.iter().nth(pos);
+                            if let Some(entity) = entity {
+                                return self.update(Message::TabActivate(entity));
+                            }
+                        }
+                    }
+            Message::TermEvent(pane, entity, event) => {
+                        match event {
+                            TermEvent::Bell => {
+                                //TODO: audible or visible bell options?
+                            }
+                            TermEvent::ClipboardLoad(kind, callback) => {
+                                match kind {
+                                    term::ClipboardType::Clipboard => {
+                                        log::info!("clipboard load");
+                                        return clipboard::read().map(move |data_opt| {
+                                            //TODO: what to do when data_opt is None?
+                                            callback(&data_opt.unwrap_or_default());
+                                            // We don't need to do anything else
+                                            message::none()
+                                        });
+                                    }
+                                    term::ClipboardType::Selection => {
+                                        log::info!("TODO: load selection");
+                                    }
+                                }
+                            }
+                            TermEvent::ClipboardStore(kind, data) => match kind {
+                                term::ClipboardType::Clipboard => {
+                                    log::info!("clipboard store");
+                                    return clipboard::write(data);
+                                }
+                                term::ClipboardType::Selection => {
+                                    log::info!("TODO: store selection");
+                                }
+                            },
+                            TermEvent::ColorRequest(index, f) => {
+                                if let Some(tab_model) = self.pane_model.panes.get(pane) {
+                                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                        let terminal = terminal.lock().unwrap();
+                                        let rgb = terminal.colors()[index].unwrap_or_default();
+                                        let text = f(rgb);
+                                        terminal.input_no_scroll(text.into_bytes());
+                                    }
+                                }
+                            }
+                            TermEvent::CursorBlinkingChange => {
+                                //TODO: should we blink the cursor?
+                            }
+                            TermEvent::Exit => {
+                                return self.update(Message::TabClose(Some(entity)));
+                            }
+                            TermEvent::PtyWrite(text) => {
+                                if let Some(tab_model) = self.pane_model.panes.get(pane) {
+                                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                        let terminal = terminal.lock().unwrap();
+                                        terminal.input_no_scroll(text.into_bytes());
+                                    }
+                                }
+                            }
+                            TermEvent::ResetTitle => {
+                                if let Some(tab_model) = self.pane_model.panes.get_mut(pane) {
+                                    let tab_title_override =
+                                        if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                            let terminal = terminal.lock().unwrap();
+                                            terminal.tab_title_override.clone()
+                                        } else {
+                                            None
+                                        };
+                                    tab_model.text_set(
+                                        entity,
+                                        tab_title_override.unwrap_or_else(|| fl!("new-terminal")),
+                                    );
+                                }
+                                return self.update_title(Some(pane));
+                            }
+                            TermEvent::TextAreaSizeRequest(f) => {
+                                if let Some(tab_model) = self.pane_model.panes.get(pane) {
+                                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                        let terminal = terminal.lock().unwrap();
+                                        let text = f(terminal.size().into());
+                                        terminal.input_no_scroll(text.into_bytes());
+                                    }
+                                }
+                            }
+                            TermEvent::Title(title) => {
+                                if let Some(tab_model) = self.pane_model.panes.get_mut(pane) {
+                                    let has_override =
+                                        if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                            let terminal = terminal.lock().unwrap();
+                                            terminal.tab_title_override.is_some()
+                                        } else {
+                                            false
+                                        };
+                                    if !has_override {
+                                        tab_model.text_set(entity, title);
+                                    }
+                                }
+                                return self.update_title(Some(pane));
+                            }
+                            TermEvent::MouseCursorDirty | TermEvent::Wakeup => {
+                                if let Some(tab_model) = self.pane_model.panes.get(pane) {
+                                    if let Some(terminal) = tab_model.data::<Mutex<Terminal>>(entity) {
+                                        let mut terminal = terminal.lock().unwrap();
+                                        terminal.needs_update = true;
+                                    }
+                                }
+                            }
+                            TermEvent::ChildExit(_error_code) => {
+                                //Ignore this for now
+                            }
+                        }
+                    }
+            Message::TermEventTx(term_event_tx) => {
+                        // Check if the terminal event channel was reset
+                        if self.term_event_tx_opt.is_some() {
+                            // Close tabs using old terminal event channel
+                            log::warn!("terminal event channel reset, closing tabs");
+
+                            // First, close other panes
+                            while let Some((_state, sibling)) =
+                                self.pane_model.panes.close(self.pane_model.focused())
+                            {
+                                self.terminal_ids.remove(&self.pane_model.focused());
+                                self.pane_model.set_focus(sibling);
+                            }
+
+                            // Next, close all tabs in the active pane
+                            if let Some(tab_model) = self.pane_model.active_mut() {
+                                let entities: Vec<_> = tab_model.iter().collect();
+                                for entity in entities {
+                                    tab_model.remove(entity);
+                                }
+                            }
+                        }
+
+                        // Set new terminal event channel
+                        self.term_event_tx_opt = Some(term_event_tx);
+
+                        // Spawn first tab
+                        return self.update(Message::TabNew);
+                    }
+            Message::Tick(ticktype) => {
+                        match ticktype {
+                            TickType::ResourceUpdate =>{ 
+                                self.resource_monitor.update_cpu_gpu_mem();
+                            },
+                            TickType::VisualUpdate => {
+                                self.resource_monitor.update_visual(&mut self.frag_shader_program);
+                            },
+                            TickType::ClockUpdate => {
+                                self.current_time = Local::now();
+                            },
+                            TickType::ProcessUpdate => {
+                                self.resource_monitor.update_processes();
+                            },
+                        }
+                    }
+            Message::ToggleContextPage(context_page) => {
+                        if self.context_page == context_page {
+                            self.core.window.show_context = !self.core.window.show_context;
+                        } else {
+                            self.context_page = context_page;
+                            self.core.window.show_context = true;
+                        }
+
+                        // Extra work to do to prepare context pages
+                        if let ContextPage::ColorSchemes(color_scheme_kind) = self.context_page {
+                            self.color_scheme_errors.clear();
+                            self.color_scheme_expanded = None;
+                            self.color_scheme_renaming = None;
+                            self.color_scheme_tab_model = widget::segmented_button::Model::default();
+                            let dark_entity = self
+                                .color_scheme_tab_model
+                                .insert()
+                                .text(fl!("dark"))
+                                .data(ColorSchemeKind::Dark)
+                                .id();
+                            let light_entity = self
+                                .color_scheme_tab_model
+                                .insert()
+                                .text(fl!("light"))
+                                .data(ColorSchemeKind::Light)
+                                .id();
+                            self.color_scheme_tab_model
+                                .activate(match color_scheme_kind {
+                                    ColorSchemeKind::Dark => dark_entity,
+                                    ColorSchemeKind::Light => light_entity,
+                                });
+                        }
+                    }
+            Message::UpdateDefaultProfile((default, profile_id)) => {
+                        config_set!(default_profile, default.then_some(profile_id));
+                    }
+            Message::WindowClose => {
+                        if let Some(window_id) = self.core.main_window_id() {
+                            return window::close(window_id);
+                        }
+                    }
+            Message::WindowNew => match env::current_exe() {
+                        Ok(exe) => match process::Command::new(&exe).spawn() {
+                            Ok(_child) => {}
+                            Err(err) => {
+                                log::error!("failed to execute {:?}: {}", exe, err);
+                            }
+                        },
+                        Err(err) => {
+                            log::error!("failed to get current executable path: {}", err);
+                        }
+                    },
             Message::WindowFocused => {
-                self.pane_model.update_terminal_focus();
-                return self.update_focus();
-            }
+                        self.pane_model.update_terminal_focus();
+                        return self.update_focus();
+                    }
             Message::WindowUnfocused => {
-                self.pane_model.unfocus_all_terminals();
-            }
+                        self.pane_model.unfocus_all_terminals();
+                    }
             Message::ZoomIn => {
-                return self.update_render_active_pane_zoom(message);
-            }
+                        return self.update_render_active_pane_zoom(message);
+                    }
             Message::ZoomOut => {
-                return self.update_render_active_pane_zoom(message);
-            }
+                        return self.update_render_active_pane_zoom(message);
+                    }
             Message::ZoomReset => {
-                self.reset_terminal_panes_zoom();
-                return self.update_config();
-            }
+                        self.reset_terminal_panes_zoom();
+                        return self.update_config();
+                    }
         }
 
         Task::none()
@@ -2835,7 +2847,7 @@ impl Application for App {
             .width(Length::Fixed(width))
             .height(Length::Fixed(width));
 
-        let [r, g, b, a] = FragmentShaderProgram::get_bg(&self.config);
+        let [r, g, b, a] = get_term_bg_colour(&self.config);
         let bg_container_style = container::Style{ 
             background: Some(
                 iced::Background::Color(Color {r,g,b,a,})), 
@@ -2843,7 +2855,8 @@ impl Application for App {
         };
 
         // resource monitor
-        let monitor = self.resource_monitor.get_monitor(&self);
+        let monitor = self.resource_monitor.view_monitor(&self);
+        let processes = self.resource_monitor.view_processes();
 
         // piece together the side bar
         let sidebar = 
@@ -2852,13 +2865,13 @@ impl Application for App {
                 column![
                     container(monitor)
                         .width(Length::Fill)
-                        .height(Length::FillPortion(2))
+                        .height(Length::Shrink)
                         .style(move |_theme| {bg_container_style.clone()})
                         .padding(Padding{top:10., ..Default::default()}), 
                     shader,
-                    container(text(""))
+                    container(processes)
                         .width(Length::Fill)
-                        .height(Length::FillPortion(1))
+                        .height(Length::Fill)
                         .style(move |_theme| {bg_container_style})
                 ]
             )
@@ -2944,10 +2957,37 @@ impl Application for App {
             // add a tick subscription for the resource monitor, clock etc.
             iced::time::every(Duration::from_secs(1))
                 .map(|_| Message::Tick(TickType::ClockUpdate)),
+            iced::time::every(Duration::from_secs(2))
+                .map(|_| Message::Tick(TickType::ProcessUpdate)),
             iced::time::every(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL)
                 .map(|_| Message::Tick(TickType::ResourceUpdate)),
             iced::time::every(Duration::from_millis(FRAME_TIME))
                 .map(|_| Message::Tick(TickType::VisualUpdate)),
         ])
     }
+}
+
+pub fn get_term_scheme(config:&Config)-> Option<ColorScheme>{
+    // attempt to get current profile's terminal background colour
+    let (name, kind) = config.syntax_theme(None);
+    let names = config.color_scheme_names(kind);
+    if let Some((_, cs_id)) = names.iter().find(|(n,_id)| *n == name ){
+        if let Some(colour_scheme) =  config.color_schemes(kind).get(cs_id) {
+            return Some(colour_scheme.to_owned())
+        };
+    };
+    None
+}
+
+pub fn get_term_bg_colour(config:&Config)->[f32;4]{
+    // fallback: use cosmic window background colour
+    let [mut r,mut g,mut b,_] = cosmic::iced::Color::from(config.app_theme.theme().cosmic().background.base).into_linear();
+    // attempt to get current profile's terminal background colour
+    if let Some(cs) = get_term_scheme(config){
+        if let Some(colour) = cs.background{
+            let [rb,gb,bb,_] = colour.to_be_bytes();
+            [r,g,b] = [rb as f32/255., gb as f32/255., bb as f32/255.,]
+        }
+    }
+    [r,g,b,config.opacity_ratio()]
 }
