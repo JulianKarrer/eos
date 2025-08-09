@@ -106,8 +106,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
 
         // ----- Parameters (tweak these) -----
         let halo_col: vec3f = vec3f(235., 155., 0.)/255.;
-        let halo_int: f32 = 1.0;
-        let halo_amp: f32 = 0.2+u.cpu_u*0.5;
+        let halo_int: f32 = 0.1+8.*u.cpu_u;
+        let halo_amp: f32 = 0.1+u.cpu_u*0.2;
         let halo_freq: f32 = 0.2;
 
         // base glow width (image-plane units) — keep this small (0.02..0.12)

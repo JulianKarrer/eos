@@ -6,10 +6,13 @@ use nvml_wrapper::{enum_wrappers::device::Clock, error::NvmlError, Nvml};
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
 
 use cosmic::iced_widget::{column, container, text, row, horizontal_rule, scrollable, Column, Text};
-
 use crate::{shader::FragmentShaderProgram, App, Message};
 
 const MAX_CPU_FREQ:f32 = 5500.;
+const GRAPH_CHAR_WIDTH:usize = 28;
+const GRAPH_GLYPHS : [char; 9] = [' ','▁','▂','▃','▄','▅','▆','▇','█'];
+
+
 fn byte_to_gb(x:u64)->f32{(x/(1_000_000)) as f32/1000.}
 fn byte_to_mb(x:u64)->u64{x/1_000_000}
 fn truncate(s: &str, max_chars: usize) -> &str {
@@ -109,6 +112,10 @@ pub struct ResourceMonitor {
     process_info: Vec<ProcessInfo>,
     process_sort_by:ProcessBy,
     ram_used:u64,
+
+    // HISTORY
+    cpu_avgs: [f32; GRAPH_CHAR_WIDTH],
+    gpu_avgs: [f32; GRAPH_CHAR_WIDTH],
 }
 
 impl ResourceMonitor{
@@ -161,6 +168,8 @@ impl ResourceMonitor{
             architecture: System::cpu_arch(),
             process_info: vec![],
             process_sort_by: ProcessBy::default(),
+            cpu_avgs: [0.0; GRAPH_CHAR_WIDTH],
+            gpu_avgs: [0.0; GRAPH_CHAR_WIDTH],
         }
     }
 
@@ -172,8 +181,9 @@ impl ResourceMonitor{
         // CPU
         self.sys.refresh_specifics(self.refreshkind);
 
+        let cpu_avg = self.sys.global_cpu_usage();
         self.cpu_info = CpuInfo {
-            cpu_avg: self.sys.global_cpu_usage(),
+            cpu_avg: cpu_avg,
             cpu_max: self.sys.cpus().iter()
                 .map(|cpu|cpu.cpu_usage())
                 .fold(f32::NEG_INFINITY, |a, b| a.max(b)),
@@ -185,11 +195,19 @@ impl ResourceMonitor{
         
         // MEMORY
         self.ram_used = self.sys.used_memory();
+
         // GPU
         let gpudat = gpu_update(&self.nv).ok();
-        self.gpu_info = gpudat.unwrap_or(self.gpu_info)
-    }
+        self.gpu_info = gpudat.unwrap_or(self.gpu_info);
 
+        // GRAPHS
+        self.cpu_avgs.rotate_right(1);
+        self.cpu_avgs[0] = cpu_avg;
+        if let Some(gpudat) = gpudat{
+            self.gpu_avgs.rotate_right(1);
+            self.gpu_avgs[0] = gpudat.util;
+        }
+    }
 
     pub fn update_processes(&mut self){
         self.sys.refresh_processes_specifics(
@@ -256,12 +274,20 @@ impl ResourceMonitor{
         );
     }
 
+    fn get_graph(data: &[f32])->String{
+        data.iter().map(|v| {
+            let fract = 0.01 * v.clamp(0., 100.) * GRAPH_GLYPHS.len() as f32; // 0 to len
+            let index = (fract.round() as usize).clamp(0, GRAPH_GLYPHS.len() - 1);
+            GRAPH_GLYPHS[index]
+        }).collect()
+    }
+
     pub fn view_monitor(&self, app:&App)->iced::widget::Column<'_, Message, cosmic::Theme>{
         let res: iced::widget::Column<'_, Message, cosmic::Theme> = column!(
             // CLOCK
             container(
                 text(
-                    format!("{}", app.current_time.format("%H:%M:%S"))
+                    format!("{}", app.current_time.format("%H : %M : %S"))
                 ).size(30).width(Length::Fill).align_x(Horizontal::Center)
             ).padding(Padding{bottom:10., ..Default::default()}).width(Length::Fill),
             horizontal_rule(2),
@@ -284,6 +310,7 @@ impl ResourceMonitor{
                 self.smooth.cpu_max,
                 self.smooth.cpu_freq as u64,
             )),
+            text(Self::get_graph(&self.cpu_avgs)),
             horizontal_rule(2),
             // MEMORY
             row![
@@ -297,13 +324,13 @@ impl ResourceMonitor{
             horizontal_rule(2),
             // GPU
             text(format!("{}", self.gpu_name)),
-            text(format!("GPU UTL   {:2.0} %\nGPU FRQ {:4} MHz\nGPU MEM {:3.1}/{:3.1} GB\nGPU PWR  {:3.0} W", 
-                self.smooth.gpu_util,
-                self.smooth.gpu_clock as u64,
+            text(format!("GPU UTL   {:2.0} %", self.smooth.gpu_util)),
+            text(format!("GPU FRQ {:4} MHz",self.smooth.gpu_clock as u64)),
+            text(Self::get_graph(&self.gpu_avgs)),
+            text(format!("GPU MEM {:3.1}/{:3.1} GB",
                 byte_to_gb(self.gpu_info.mem_used),
-                byte_to_gb(self.gpu_info.mem_total),
-                self.smooth.gpu_power/1000.,
-            )),
+                byte_to_gb(self.gpu_info.mem_total))),
+            text(format!("GPU PWR  {:3.0} W", self.smooth.gpu_power/1000.)),
             horizontal_rule(2),
         ).padding(Padding{left:10.,right:10.,bottom:20.,..Default::default()});
         res
@@ -326,20 +353,21 @@ impl ResourceMonitor{
             text("   RAM"),
         ];
 
-        let mut column = Column::new();
+        let mut column: Column<'_, Message, cosmic::Theme, cosmic::Renderer> = Column::new();
         for pi in &self.process_info {
             column = column.push(Text::new(pi.to_string()));
         }
 
         column![
-            // spacer:
-            container(text("").width(Length::Fill)).padding(Padding{bottom:20., ..Default::default()}).width(Length::Fill),
             // header:
-            header.width(Length::Fill).height(Length::Shrink),
+            header.width(Length::Fill).height(Length::Shrink)
+                .padding(Padding{top:30., bottom:5., ..Default::default()}),
             // scrollable:
-            scrollable(column).width(Length::Fill).height(Length::Fill)
+            container(scrollable(column).width(Length::Fill))
+                .height(Length::FillPortion(4))
+                .padding(Padding{bottom:30., ..Default::default()}),
         ]
-        .width(Length::Fill).height(Length::Fill).into()
+        .width(Length::Fill).height(Length::Fill)
     }
 }
 

@@ -2877,6 +2877,8 @@ impl Application for App {
             )
             .width(Length::Fixed(width)).height(Length::Fill); 
 
+        
+
         row![
             pane_grid, 
             sidebar,
