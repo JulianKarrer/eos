@@ -10,7 +10,7 @@ use crate::{shader::FragmentShaderProgram, App, Message};
 
 const MAX_CPU_FREQ:f32 = 5500.;
 const GRAPH_CHAR_WIDTH:usize = 28;
-const GRAPH_GLYPHS : [char; 9] = [' ','▁','▂','▃','▄','▅','▆','▇','█'];
+const BLOCK_GRAPH_GLYPHS : [char; 9] = [' ','▁','▂','▃','▄','▅','▆','▇','█'];
 
 
 fn byte_to_gb(x:u64)->f32{(x/(1_000_000)) as f32/1000.}
@@ -274,13 +274,121 @@ impl ResourceMonitor{
         );
     }
 
-    fn get_graph(data: &[f32])->String{
+    fn block_graph(data: &[f32])->String{
         data.iter().map(|v| {
-            let fract = 0.01 * v.clamp(0., 100.) * GRAPH_GLYPHS.len() as f32; // 0 to len
-            let index = (fract.round() as usize).clamp(0, GRAPH_GLYPHS.len() - 1);
-            GRAPH_GLYPHS[index]
+            let fract = 0.01 * v.clamp(0., 100.) * BLOCK_GRAPH_GLYPHS.len() as f32; // 0 to len
+            let index = (fract.round() as usize).clamp(0, BLOCK_GRAPH_GLYPHS.len() - 1);
+            BLOCK_GRAPH_GLYPHS[index]
         }).collect()
     }
+
+    fn braille_graph(data: &[f32], vertical_lines: usize) -> String {
+        if data.is_empty() || vertical_lines == 0 {return String::new();}
+
+        let px_w = GRAPH_CHAR_WIDTH.saturating_mul(2);
+        let px_h = vertical_lines.saturating_mul(4);
+
+        // Create pixel buffer
+        let mut pix = vec![0u8; px_w * px_h];
+
+        // Helper to set a pixel
+        let mut set_pixel = |x: isize, y: isize| {
+            if x >= 0 && (x as usize) < px_w && y >= 0 && (y as usize) < px_h {
+                pix[(y as usize) * px_w + (x as usize)] = 1;
+            }
+        };
+
+        // Map data points to pixel coordinates
+        let n = data.len();
+        let coords: Vec<(isize, isize)> = if n == 1 {
+            let x = (px_w as isize - 1) / 2;
+            let v = data[0].clamp(0.0, 100.0);
+            let y = ((1.0 - v / 100.0) * (px_h as f32 - 1.0)).round() as isize;
+            vec![(x, y)]
+        } else {
+            (0..n)
+                .map(|i| {
+                    let x = ((i as f32) * ((px_w - 1) as f32) / ((n - 1) as f32)).round() as isize;
+                    let v = data[i].clamp(0.0, 100.0);
+                    let y = ((1.0 - v / 100.0) * (px_h as f32 - 1.0)).round() as isize;
+                    (x, y)
+                })
+                .collect()
+        };
+
+        // Draw lines between consecutive coords
+        let mut it = coords.iter();
+        if let Some(&first) = it.next() {
+            set_pixel(first.0, first.1);
+            let mut last = first;
+            for &pt in it {
+                // Bresenham line between last and pt
+                let (mut x0, mut y0) = (last.0, last.1);
+                let (x1, y1) = (pt.0, pt.1);
+                let dx = (x1 - x0).abs();
+                let sx = if x0 < x1 { 1 } else { -1 };
+                let dy = -(y1 - y0).abs();
+                let sy = if y0 < y1 { 1 } else { -1 };
+                let mut err = dx + dy;
+                loop {
+                    set_pixel(x0, y0);
+                    if x0 == x1 && y0 == y1 { break; }
+                    let e2 = 2 * err;
+                    if e2 >= dy {
+                        err += dy;
+                        x0 += sx;
+                    }
+                    if e2 <= dx {
+                        err += dx;
+                        y0 += sy;
+                    }
+                }
+                last = pt;
+            }
+        }
+
+        // Convert pixel grid to braille characters
+        let mut out = String::new();
+        for char_row in 0..vertical_lines {
+            for char_col in 0..GRAPH_CHAR_WIDTH {
+                let mut bits: u32 = 0;
+                let top_py = (char_row * 4) as isize;
+                let left_px = (char_col * 2) as isize;
+                for sub_y in 0..4 {
+                    for sub_x in 0..2 {
+                        let px = left_px + sub_x as isize;
+                        let py = top_py + sub_y as isize;
+                        let idx = (py as usize) * px_w + (px as usize);
+                        if pix[idx] != 0 {
+                            let bit = match (sub_x, sub_y) {
+                                (0, 0) => 0x01,
+                                (0, 1) => 0x02,
+                                (0, 2) => 0x04,
+                                (1, 0) => 0x08,
+                                (1, 1) => 0x10,
+                                (1, 2) => 0x20,
+                                (0, 3) => 0x40,
+                                (1, 3) => 0x80,
+                                _ => 0,
+                            };
+                            bits |= bit;
+                        }
+                    }
+                }
+                if bits == 0 {
+                    out.push(' ');
+                } else {
+                    let codepoint = 0x2800u32 + bits;
+                    out.push(std::char::from_u32(codepoint).unwrap_or(' '));
+                }
+            }
+            if char_row + 1 < vertical_lines {
+                out.push('\n');
+            }
+        }
+        out
+    }
+    
 
     pub fn view_monitor(&self, app:&App)->iced::widget::Column<'_, Message, cosmic::Theme>{
         let res: iced::widget::Column<'_, Message, cosmic::Theme> = column!(
@@ -310,7 +418,7 @@ impl ResourceMonitor{
                 self.smooth.cpu_max,
                 self.smooth.cpu_freq as u64,
             )),
-            text(Self::get_graph(&self.cpu_avgs)),
+            text(Self::braille_graph(&self.cpu_avgs, 2)),
             horizontal_rule(2),
             // MEMORY
             row![
@@ -326,13 +434,13 @@ impl ResourceMonitor{
             text(format!("{}", self.gpu_name)),
             text(format!("GPU UTL   {:2.0} %", self.smooth.gpu_util)),
             text(format!("GPU FRQ {:4} MHz",self.smooth.gpu_clock as u64)),
-            text(Self::get_graph(&self.gpu_avgs)),
             text(format!("GPU MEM {:3.1}/{:3.1} GB",
                 byte_to_gb(self.gpu_info.mem_used),
                 byte_to_gb(self.gpu_info.mem_total))),
             text(format!("GPU PWR  {:3.0} W", self.smooth.gpu_power/1000.)),
+            text(Self::braille_graph(&self.gpu_avgs, 2)),
             horizontal_rule(2),
-        ).padding(Padding{left:10.,right:10.,bottom:20.,..Default::default()});
+        ).padding(Padding{left:10.,right:10.,bottom:10.,..Default::default()});
         res
     }
 
@@ -359,6 +467,7 @@ impl ResourceMonitor{
         }
 
         column![
+            horizontal_rule(2),
             // header:
             header.width(Length::Fill).height(Length::Shrink)
                 .padding(Padding{top:30., bottom:5., ..Default::default()}),
